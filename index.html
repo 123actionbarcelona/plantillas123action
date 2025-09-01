@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Plantillas de Correo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .template-preview {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .modal-backdrop {
+            backdrop-filter: blur(4px);
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        .slide-in {
+            animation: slideIn 0.3s ease-out;
+        }
+        .toast {
+            animation: slideIn 0.3s ease-out;
+        }
+        .login-container {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .login-form {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
+    
+    <!-- Login Screen -->
+    <div id="loginScreen" class="min-h-screen flex items-center justify-center login-container">
+        <div class="login-form rounded-2xl shadow-2xl p-8 w-full max-w-md">
+            <div class="text-center mb-8">
+                <div class="mx-auto w-20 h-20 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mb-4">
+                    <i class="fas fa-shield-alt text-3xl text-white"></i>
+                </div>
+                <h1 class="text-3xl font-bold text-gray-800">Admin Access</h1>
+                <p class="text-gray-600 mt-2">Ingresa tus credenciales para continuar</p>
+            </div>
+            
+            <form id="loginForm" class="space-y-6">
+                <div id="loginError" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded"></div>
+                
+                <div>
+                    <label for="username" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-user mr-2"></i>Usuario
+                    </label>
+                    <input type="text" id="username" required 
+                        class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-blue-500 transition-colors"
+                        placeholder="Ingresa tu usuario">
+                </div>
+                
+                <div>
+                    <label for="password" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-lock mr-2"></i>Contraseña
+                    </label>
+                    <input type="password" id="password" required 
+                        class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-blue-500 transition-colors"
+                        placeholder="Ingresa tu contraseña">
+                </div>
+                
+                <button type="submit" id="loginBtn" 
+                    class="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-300 flex items-center justify-center">
+                    <i class="fas fa-sign-in-alt mr-2"></i>
+                    <span>Iniciar Sesión</span>
+                </button>
+            </form>
+            
+            <div class="mt-8 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h3 class="font-semibold text-blue-800 mb-2">🔑 Credenciales por Defecto:</h3>
+                <p class="text-blue-700 text-sm"><strong>Usuario:</strong> admin</p>
+                <p class="text-blue-700 text-sm"><strong>Contraseña:</strong> admin123</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Main App (Hidden until login) -->
+    <div id="mainApp" class="hidden">
+    <!-- Header -->
+    <header class="bg-white shadow-lg sticky top-0 z-40">
+        <div class="container mx-auto px-4 py-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-800 flex items-center gap-3">
+                        <i class="fas fa-envelope-open-text text-blue-600"></i>
+                        Gestor de Plantillas de Correo
+                    </h1>
+                    <p class="text-gray-600 mt-2">Administra y personaliza tus plantillas de email</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="hidden md:flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-lg">
+                        <i class="fas fa-user-shield text-green-600"></i>
+                        <span id="userInfo" class="text-gray-700 font-medium">admin</span>
+                    </div>
+                    <button id="searchBtn" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                        <i class="fas fa-search mr-2"></i>Buscar
+                    </button>
+                    <button id="manageUsersBtn" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2">
+                        <i class="fas fa-users"></i>
+                        <span class="hidden md:inline">Usuarios</span>
+                    </button>
+                    <button id="addTemplateBtn" class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-md hover:shadow-lg">
+                        <i class="fas fa-plus-circle"></i>
+                        Nueva Plantilla
+                    </button>
+                    <button id="logoutBtn" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Search Bar (Hidden by default) -->
+    <div id="searchBar" class="hidden bg-white border-b shadow-sm">
+        <div class="container mx-auto px-4 py-3">
+            <div class="relative">
+                <input type="text" id="searchInput" placeholder="Buscar plantillas por título o descripción..." 
+                    class="w-full px-4 py-2 pr-10 border rounded-lg focus:outline-none focus:border-blue-500">
+                <button id="clearSearch" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 py-8">
+        <!-- Stats -->
+        <div class="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">Total Plantillas</p>
+                        <p id="totalTemplates" class="text-2xl font-bold text-gray-800">0</p>
+                    </div>
+                    <i class="fas fa-file-alt text-3xl text-blue-500"></i>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">Última Actualización</p>
+                        <p id="lastUpdate" class="text-lg font-semibold text-gray-800">-</p>
+                    </div>
+                    <i class="fas fa-clock text-3xl text-green-500"></i>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">Espacio Usado</p>
+                        <p id="storageUsed" class="text-lg font-semibold text-gray-800">0 KB</p>
+                    </div>
+                    <i class="fas fa-database text-3xl text-purple-500"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Templates Grid -->
+        <div id="templatesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- Las plantillas se renderizarán aquí dinámicamente -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="hidden text-center py-16">
+            <i class="fas fa-inbox text-6xl text-gray-300 mb-4"></i>
+            <h2 class="text-2xl font-semibold text-gray-600 mb-2">No hay plantillas</h2>
+            <p class="text-gray-500 mb-6">Comienza agregando tu primera plantilla de correo</p>
+            <button onclick="document.getElementById('addTemplateBtn').click()" 
+                class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                <i class="fas fa-plus mr-2"></i>Agregar Primera Plantilla
+            </button>
+        </div>
+    </main>
+
+    <!-- Add Template Modal -->
+    <div id="addTemplateModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0 bg-black bg-opacity-50"></div>
+        <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden slide-in">
+            <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6">
+                <h2 class="text-2xl font-bold flex items-center gap-3">
+                    <i class="fas fa-file-plus"></i>
+                    Nueva Plantilla de Correo
+                </h2>
+            </div>
+            <form id="addTemplateForm" class="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
+                <div class="mb-5">
+                    <label for="templateTitle" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-heading mr-2"></i>Título
+                    </label>
+                    <input type="text" id="templateTitle" required 
+                        class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500"
+                        placeholder="Ej: Bienvenida a nuevos usuarios">
+                </div>
+                <div class="mb-5">
+                    <label for="templateDescription" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-align-left mr-2"></i>Descripción
+                    </label>
+                    <input type="text" id="templateDescription" required 
+                        class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500"
+                        placeholder="Ej: Email de bienvenida con información básica">
+                </div>
+                <div class="mb-5">
+                    <label for="templateHTML" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-code mr-2"></i>Código HTML
+                    </label>
+                    <textarea id="templateHTML" required rows="10"
+                        class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500 font-mono text-sm"
+                        placeholder="Pega aquí el código HTML de tu plantilla..."></textarea>
+                </div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" id="cancelAddBtn" 
+                        class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                        Cancelar
+                    </button>
+                    <button type="submit" 
+                        class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+                        <i class="fas fa-save"></i>
+                        Guardar Plantilla
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Template Modal -->
+    <div id="editTemplateModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0 bg-black bg-opacity-50"></div>
+        <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden slide-in">
+            <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6">
+                <h2 class="text-2xl font-bold flex items-center gap-3">
+                    <i class="fas fa-edit"></i>
+                    Editar Plantilla
+                </h2>
+            </div>
+            <form id="editTemplateForm" class="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
+                <input type="hidden" id="editTemplateId">
+                <div class="mb-5">
+                    <label for="editTemplateTitle" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-heading mr-2"></i>Título
+                    </label>
+                    <input type="text" id="editTemplateTitle" required 
+                        class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-green-500">
+                </div>
+                <div class="mb-5">
+                    <label for="editTemplateDescription" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-align-left mr-2"></i>Descripción
+                    </label>
+                    <input type="text" id="editTemplateDescription" required 
+                        class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-green-500">
+                </div>
+                <div class="mb-5">
+                    <label for="editTemplateHTML" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-code mr-2"></i>Código HTML
+                    </label>
+                    <textarea id="editTemplateHTML" required rows="10"
+                        class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-green-500 font-mono text-sm"></textarea>
+                </div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" id="cancelEditBtn" 
+                        class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                        Cancelar
+                    </button>
+                    <button type="submit" 
+                        class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                        <i class="fas fa-save"></i>
+                        Actualizar Plantilla
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- User Management Modal -->
+    <div id="userManagementModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0 bg-black bg-opacity-50"></div>
+        <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden slide-in">
+            <div class="bg-gradient-to-r from-purple-600 to-purple-700 text-white p-6">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-2xl font-bold flex items-center gap-3">
+                        <i class="fas fa-users"></i>
+                        Gestión de Usuarios
+                    </h2>
+                    <button id="closeUserModal" class="text-white hover:bg-white hover:bg-opacity-20 rounded-lg p-2 transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+                <!-- Formulario para nuevo usuario -->
+                <div class="bg-gray-50 rounded-lg p-6 mb-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-user-plus text-purple-600"></i>
+                        Agregar Nuevo Usuario
+                    </h3>
+                    
+                    <form id="createUserForm" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label for="newUsername" class="block text-gray-700 font-medium mb-2">
+                                <i class="fas fa-user mr-1"></i>Usuario *
+                            </label>
+                            <input type="text" id="newUsername" required 
+                                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-purple-500"
+                                placeholder="Ej: maria.garcia">
+                        </div>
+                        <div>
+                            <label for="newEmail" class="block text-gray-700 font-medium mb-2">
+                                <i class="fas fa-envelope mr-1"></i>Email
+                            </label>
+                            <input type="email" id="newEmail" 
+                                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-purple-500"
+                                placeholder="maria@empresa.com">
+                        </div>
+                        <div>
+                            <label for="newPassword" class="block text-gray-700 font-medium mb-2">
+                                <i class="fas fa-lock mr-1"></i>Contraseña *
+                            </label>
+                            <input type="password" id="newPassword" required 
+                                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-purple-500"
+                                placeholder="Mínimo 6 caracteres">
+                        </div>
+                        <div class="md:col-span-3 flex justify-end">
+                            <button type="submit" 
+                                class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2">
+                                <i class="fas fa-plus"></i>
+                                Crear Usuario
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- Lista de usuarios -->
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-list text-purple-600"></i>
+                        Usuarios Existentes
+                    </h3>
+                    
+                    <div id="usersList" class="space-y-3">
+                        <!-- Los usuarios se cargarán aquí dinámicamente -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="editUserModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0 bg-black bg-opacity-50"></div>
+        <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden slide-in">
+            <div class="bg-gradient-to-r from-orange-600 to-orange-700 text-white p-6">
+                <h2 class="text-xl font-bold flex items-center gap-3">
+                    <i class="fas fa-user-edit"></i>
+                    Editar Usuario
+                </h2>
+            </div>
+            <form id="editUserForm" class="p-6 space-y-4">
+                <input type="hidden" id="editUserId">
+                <div>
+                    <label for="editUsername" class="block text-gray-700 font-medium mb-2">
+                        <i class="fas fa-user mr-1"></i>Usuario *
+                    </label>
+                    <input type="text" id="editUsername" required 
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-orange-500">
+                </div>
+                <div>
+                    <label for="editEmail" class="block text-gray-700 font-medium mb-2">
+                        <i class="fas fa-envelope mr-1"></i>Email
+                    </label>
+                    <input type="email" id="editEmail" 
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-orange-500">
+                </div>
+                <div>
+                    <label for="editPassword" class="block text-gray-700 font-medium mb-2">
+                        <i class="fas fa-lock mr-1"></i>Nueva Contraseña
+                    </label>
+                    <input type="password" id="editPassword" 
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-orange-500"
+                        placeholder="Dejar vacío para mantener actual">
+                    <p class="text-xs text-gray-500 mt-1">Deja vacío si no quieres cambiar la contraseña</p>
+                </div>
+                <div class="flex justify-end gap-3 pt-4">
+                    <button type="button" id="cancelEditUser" 
+                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                        Cancelar
+                    </button>
+                    <button type="submit" 
+                        class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center gap-2">
+                        <i class="fas fa-save"></i>
+                        Actualizar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="hidden fixed bottom-8 right-8 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg toast z-50 flex items-center gap-3">
+        <i class="fas fa-check-circle"></i>
+        <span id="toastMessage">Operación exitosa</span>
+    </div>
+
+    </div> <!-- Fin mainApp -->
+
+    <script src="app.js"></script>
+</body>
+</html>

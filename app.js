@@ -1,0 +1,948 @@
+// Estado de la aplicación
+let templates = [];
+let filteredTemplates = [];
+let editingId = null;
+let authToken = null;
+let currentUser = null;
+
+// URL de la API (cambiar según tu configuración)
+const API_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:3333/api' 
+  : '/api';
+
+// Inicialización
+document.addEventListener('DOMContentLoaded', () => {
+  initAuth();
+});
+
+// =================================
+// FUNCIONES DE AUTENTICACIÓN
+// =================================
+
+// Inicializar autenticación
+async function initAuth() {
+  const token = localStorage.getItem('authToken');
+  
+  if (token) {
+    authToken = token;
+    try {
+      const isValid = await verifyToken();
+      if (isValid) {
+        showMainApp();
+        return;
+      }
+    } catch (error) {
+      console.log('Token inválido, redirigiendo a login');
+    }
+  }
+  
+  showLoginScreen();
+}
+
+// Verificar token con el servidor
+async function verifyToken() {
+  try {
+    const response = await fetch(`${API_URL}/verify`, {
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      currentUser = data.user;
+      return true;
+    }
+    return false;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Mostrar pantalla de login
+function showLoginScreen() {
+  document.getElementById('loginScreen').classList.remove('hidden');
+  document.getElementById('mainApp').classList.add('hidden');
+  setupLoginListeners();
+}
+
+// Mostrar aplicación principal
+function showMainApp() {
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('mainApp').classList.remove('hidden');
+  
+  // Actualizar info del usuario
+  if (currentUser) {
+    document.getElementById('userInfo').textContent = currentUser.username;
+  }
+  
+  setupEventListeners();
+  loadTemplates();
+  updateStats();
+  
+  // Auto-actualizar cada 30 segundos para sincronización
+  setInterval(() => {
+    loadTemplates(true);
+  }, 30000);
+}
+
+// Configurar listeners del login
+function setupLoginListeners() {
+  document.getElementById('loginForm').addEventListener('submit', handleLogin);
+}
+
+// Manejar login
+async function handleLogin(e) {
+  e.preventDefault();
+  
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const loginBtn = document.getElementById('loginBtn');
+  const loginError = document.getElementById('loginError');
+  
+  // Mostrar estado de carga
+  loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Iniciando sesión...';
+  loginBtn.disabled = true;
+  loginError.classList.add('hidden');
+  
+  try {
+    const response = await fetch(`${API_URL}/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ username, password })
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      // Login exitoso
+      authToken = data.token;
+      currentUser = data.user;
+      localStorage.setItem('authToken', authToken);
+      
+      showToast('Login exitoso', 'success');
+      showMainApp();
+    } else {
+      // Error en login
+      loginError.textContent = data.error;
+      loginError.classList.remove('hidden');
+    }
+  } catch (error) {
+    loginError.textContent = 'Error de conexión. Verifica que el servidor esté ejecutándose.';
+    loginError.classList.remove('hidden');
+  } finally {
+    // Restaurar botón
+    loginBtn.innerHTML = '<i class="fas fa-sign-in-alt mr-2"></i><span>Iniciar Sesión</span>';
+    loginBtn.disabled = false;
+  }
+}
+
+// Logout
+function logout() {
+  authToken = null;
+  currentUser = null;
+  localStorage.removeItem('authToken');
+  templates = [];
+  filteredTemplates = [];
+  showLoginScreen();
+  showToast('Sesión cerrada exitosamente', 'success');
+}
+
+// Obtener headers con autenticación
+function getAuthHeaders() {
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+  
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  
+  return headers;
+}
+
+// Manejar errores de autenticación
+function handleAuthError(response) {
+  if (response.status === 401 || response.status === 403) {
+    logout();
+    return true;
+  }
+  return false;
+}
+
+// =================================
+// CONFIGURACIÓN DE EVENT LISTENERS
+// =================================
+
+// Configurar event listeners
+function setupEventListeners() {
+  // Botón logout
+  document.getElementById('logoutBtn').addEventListener('click', logout);
+  
+  // Botón gestionar usuarios
+  document.getElementById('manageUsersBtn').addEventListener('click', openUserManagement);
+  
+  // Botón agregar plantilla
+  document.getElementById('addTemplateBtn').addEventListener('click', () => {
+    openAddModal();
+  });
+
+  // Formulario agregar plantilla
+  document.getElementById('addTemplateForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    addTemplate();
+  });
+
+  // Formulario editar plantilla
+  document.getElementById('editTemplateForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    updateTemplate();
+  });
+
+  // Botones cancelar
+  document.getElementById('cancelAddBtn').addEventListener('click', closeAddModal);
+  document.getElementById('cancelEditBtn').addEventListener('click', closeEditModal);
+
+  // Click fuera del modal para cerrar
+  document.getElementById('addTemplateModal').addEventListener('click', (e) => {
+    if (e.target.id === 'addTemplateModal') {
+      closeAddModal();
+    }
+  });
+
+  document.getElementById('editTemplateModal').addEventListener('click', (e) => {
+    if (e.target.id === 'editTemplateModal') {
+      closeEditModal();
+    }
+  });
+
+  // Búsqueda
+  document.getElementById('searchBtn').addEventListener('click', toggleSearch);
+  document.getElementById('clearSearch').addEventListener('click', clearSearch);
+  document.getElementById('searchInput').addEventListener('input', (e) => {
+    filterTemplates(e.target.value);
+  });
+}
+
+// Cargar plantillas desde el servidor
+async function loadTemplates(silent = false) {
+  if (!silent) showLoading(true);
+  
+  try {
+    const response = await fetch(`${API_URL}/templates`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (handleAuthError(response)) return;
+    if (!response.ok) throw new Error('Error al cargar plantillas');
+    
+    templates = await response.json();
+    filteredTemplates = [...templates];
+    renderTemplates();
+    
+    if (!silent) {
+      showToast('Plantillas cargadas exitosamente');
+    }
+  } catch (error) {
+    console.error('Error cargando plantillas:', error);
+    if (!silent) {
+      showToast('Error al cargar plantillas. Intentando modo offline...', 'error');
+      loadOfflineTemplates();
+    }
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Cargar plantillas offline (fallback)
+function loadOfflineTemplates() {
+  const stored = localStorage.getItem('emailTemplates_backup');
+  if (stored) {
+    templates = JSON.parse(stored);
+    filteredTemplates = [...templates];
+    renderTemplates();
+    showToast('Modo offline activado', 'warning');
+  }
+}
+
+// Guardar backup local
+function saveBackup() {
+  localStorage.setItem('emailTemplates_backup', JSON.stringify(templates));
+}
+
+// Renderizar plantillas
+function renderTemplates() {
+  const grid = document.getElementById('templatesGrid');
+  const emptyState = document.getElementById('emptyState');
+  
+  if (filteredTemplates.length === 0) {
+    grid.innerHTML = '';
+    emptyState.classList.remove('hidden');
+    return;
+  }
+  
+  emptyState.classList.add('hidden');
+  grid.innerHTML = filteredTemplates.map((template) => {
+    return `
+      <div class="bg-white rounded-lg shadow-lg hover:shadow-xl transition-shadow duration-300 overflow-hidden template-card" data-id="${template.id}">
+        <div class="p-6">
+          <div class="flex justify-between items-start mb-4">
+            <div>
+              <h3 class="text-xl font-bold text-gray-800 mb-2">${escapeHtml(template.title)}</h3>
+              <p class="text-gray-600 text-sm">${escapeHtml(template.description)}</p>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="editTemplate('${template.id}')" 
+                class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar">
+                <i class="fas fa-edit"></i>
+              </button>
+              <button onclick="deleteTemplate('${template.id}')" 
+                class="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Eliminar">
+                <i class="fas fa-trash"></i>
+              </button>
+              <button onclick="syncTemplate('${template.id}')" 
+                class="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Sincronizar">
+                <i class="fas fa-sync"></i>
+              </button>
+            </div>
+          </div>
+          
+          <div class="template-preview bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200">
+            <iframe srcdoc="${template.html.replace(/"/g, '&quot;')}" 
+              class="w-full h-48 rounded border-0"></iframe>
+          </div>
+          
+          <div class="flex gap-2">
+            <button onclick="copyTemplate('${template.id}')" 
+              class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+              <i class="fas fa-copy"></i>
+              Copiar Código
+            </button>
+            <button onclick="previewTemplate('${template.id}')" 
+              class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+          
+          ${template.updated_at ? `
+            <div class="mt-3 text-xs text-gray-500 text-right">
+              <i class="fas fa-clock"></i> Actualizado: ${new Date(template.updated_at).toLocaleString()}
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  saveBackup();
+}
+
+// Agregar nueva plantilla
+async function addTemplate() {
+  const title = document.getElementById('templateTitle').value;
+  const description = document.getElementById('templateDescription').value;
+  const html = document.getElementById('templateHTML').value;
+  
+  showLoading(true);
+  
+  try {
+    const response = await fetch(`${API_URL}/templates`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ title, description, html })
+    });
+    
+    if (handleAuthError(response)) return;
+    if (!response.ok) throw new Error('Error al crear plantilla');
+    
+    const newTemplate = await response.json();
+    templates.unshift(newTemplate);
+    filteredTemplates = [...templates];
+    renderTemplates();
+    closeAddModal();
+    showToast('Plantilla agregada exitosamente');
+    updateStats();
+    
+    // Limpiar formulario
+    document.getElementById('addTemplateForm').reset();
+  } catch (error) {
+    console.error('Error agregando plantilla:', error);
+    showToast('Error al agregar plantilla', 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Editar plantilla
+async function editTemplate(id) {
+  const template = templates.find(t => t.id === id);
+  if (!template) return;
+  
+  editingId = id;
+  
+  document.getElementById('editTemplateTitle').value = template.title;
+  document.getElementById('editTemplateDescription').value = template.description;
+  document.getElementById('editTemplateHTML').value = template.html;
+  
+  document.getElementById('editTemplateModal').classList.remove('hidden');
+}
+
+// Actualizar plantilla
+async function updateTemplate() {
+  if (!editingId) return;
+  
+  const title = document.getElementById('editTemplateTitle').value;
+  const description = document.getElementById('editTemplateDescription').value;
+  const html = document.getElementById('editTemplateHTML').value;
+  
+  showLoading(true);
+  
+  try {
+    const response = await fetch(`${API_URL}/templates/${editingId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ title, description, html })
+    });
+    
+    if (handleAuthError(response)) return;
+    if (!response.ok) throw new Error('Error al actualizar plantilla');
+    
+    const updatedTemplate = await response.json();
+    const index = templates.findIndex(t => t.id === editingId);
+    if (index !== -1) {
+      templates[index] = updatedTemplate;
+      filteredTemplates = [...templates];
+      renderTemplates();
+    }
+    
+    closeEditModal();
+    showToast('Plantilla actualizada exitosamente');
+    updateStats();
+  } catch (error) {
+    console.error('Error actualizando plantilla:', error);
+    showToast('Error al actualizar plantilla', 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Eliminar plantilla
+async function deleteTemplate(id) {
+  if (!confirm('¿Estás seguro de que quieres eliminar esta plantilla? Esta acción se sincronizará en todos los dispositivos.')) {
+    return;
+  }
+  
+  showLoading(true);
+  
+  try {
+    const response = await fetch(`${API_URL}/templates/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    
+    if (handleAuthError(response)) return;
+    if (!response.ok) throw new Error('Error al eliminar plantilla');
+    
+    templates = templates.filter(t => t.id !== id);
+    filteredTemplates = [...templates];
+    renderTemplates();
+    showToast('Plantilla eliminada exitosamente', 'error');
+    updateStats();
+  } catch (error) {
+    console.error('Error eliminando plantilla:', error);
+    showToast('Error al eliminar plantilla', 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Sincronizar plantilla individual
+async function syncTemplate(id) {
+  showLoading(true);
+  
+  try {
+    const response = await fetch(`${API_URL}/templates/${id}`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (handleAuthError(response)) return;
+    if (!response.ok) throw new Error('Error al sincronizar');
+    
+    const updatedTemplate = await response.json();
+    const index = templates.findIndex(t => t.id === id);
+    
+    if (index !== -1) {
+      templates[index] = updatedTemplate;
+      filteredTemplates = [...templates];
+      renderTemplates();
+      showToast('Plantilla sincronizada');
+    }
+  } catch (error) {
+    console.error('Error sincronizando:', error);
+    showToast('Error al sincronizar', 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Copiar al portapapeles
+function copyTemplate(id) {
+  const template = templates.find(t => t.id === id);
+  if (!template) return;
+  
+  navigator.clipboard.writeText(template.html).then(() => {
+    showToast('Código copiado al portapapeles');
+  }).catch(err => {
+    console.error('Error al copiar:', err);
+    showToast('Error al copiar el código', 'error');
+  });
+}
+
+// Vista previa en nueva ventana
+function previewTemplate(id) {
+  const template = templates.find(t => t.id === id);
+  if (!template) return;
+  
+  const win = window.open('', '_blank');
+  win.document.write(template.html);
+  win.document.close();
+}
+
+// Filtrar plantillas
+function filterTemplates(query) {
+  if (!query) {
+    filteredTemplates = [...templates];
+  } else {
+    const searchTerm = query.toLowerCase();
+    filteredTemplates = templates.filter(template => 
+      template.title.toLowerCase().includes(searchTerm) ||
+      template.description.toLowerCase().includes(searchTerm)
+    );
+  }
+  renderTemplates();
+}
+
+// Toggle búsqueda
+function toggleSearch() {
+  const searchBar = document.getElementById('searchBar');
+  searchBar.classList.toggle('hidden');
+  if (!searchBar.classList.contains('hidden')) {
+    document.getElementById('searchInput').focus();
+  }
+}
+
+// Limpiar búsqueda
+function clearSearch() {
+  document.getElementById('searchInput').value = '';
+  filterTemplates('');
+  document.getElementById('searchBar').classList.add('hidden');
+}
+
+// Actualizar estadísticas
+async function updateStats() {
+  try {
+    const response = await fetch(`${API_URL}/stats`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (handleAuthError(response)) return;
+    if (!response.ok) throw new Error('Error al cargar estadísticas');
+    
+    const stats = await response.json();
+    
+    document.getElementById('totalTemplates').textContent = stats.total;
+    
+    if (stats.lastUpdate) {
+      const date = new Date(stats.lastUpdate);
+      document.getElementById('lastUpdate').textContent = date.toLocaleDateString('es-ES');
+    }
+    
+    const sizeInKB = (stats.totalSize / 1024).toFixed(2);
+    document.getElementById('storageUsed').textContent = `${sizeInKB} KB`;
+  } catch (error) {
+    console.error('Error cargando estadísticas:', error);
+  }
+}
+
+// Modal functions
+function openAddModal() {
+  document.getElementById('addTemplateModal').classList.remove('hidden');
+  document.getElementById('templateTitle').focus();
+}
+
+function closeAddModal() {
+  document.getElementById('addTemplateModal').classList.add('hidden');
+  document.getElementById('addTemplateForm').reset();
+}
+
+function closeEditModal() {
+  document.getElementById('editTemplateModal').classList.add('hidden');
+  editingId = null;
+}
+
+// Mostrar indicador de carga
+function showLoading(show) {
+  const existingLoader = document.getElementById('loadingIndicator');
+  
+  if (show) {
+    if (!existingLoader) {
+      const loader = document.createElement('div');
+      loader.id = 'loadingIndicator';
+      loader.className = 'fixed top-20 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2';
+      loader.innerHTML = `
+        <i class="fas fa-spinner fa-spin"></i>
+        <span>Sincronizando...</span>
+      `;
+      document.body.appendChild(loader);
+    }
+  } else {
+    if (existingLoader) {
+      existingLoader.remove();
+    }
+  }
+}
+
+// Mostrar notificación toast
+function showToast(message, type = 'success') {
+  const toast = document.getElementById('toast');
+  const toastMessage = document.getElementById('toastMessage');
+  
+  toastMessage.textContent = message;
+  
+  // Cambiar color según el tipo
+  let bgColor = 'bg-green-600';
+  let icon = 'fa-check-circle';
+  
+  if (type === 'error') {
+    bgColor = 'bg-red-600';
+    icon = 'fa-exclamation-circle';
+  } else if (type === 'warning') {
+    bgColor = 'bg-yellow-600';
+    icon = 'fa-exclamation-triangle';
+  }
+  
+  toast.className = `fixed bottom-8 right-8 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg toast z-50 flex items-center gap-3`;
+  toast.querySelector('i').className = `fas ${icon}`;
+  
+  toast.classList.remove('hidden');
+  
+  setTimeout(() => {
+    toast.classList.add('hidden');
+  }, 3000);
+}
+
+// Función para escapar HTML
+function escapeHtml(text) {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// Verificar conexión con el servidor
+async function checkServerConnection() {
+  try {
+    const response = await fetch(`${API_URL}/templates`);
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Verificar conexión al cargar
+checkServerConnection().then(isConnected => {
+  if (!isConnected) {
+    showToast('No se puede conectar al servidor. Modo offline activado.', 'warning');
+    loadOfflineTemplates();
+  }
+});
+
+// =================================
+// GESTIÓN DE USUARIOS
+// =================================
+
+let users = [];
+let editingUserId = null;
+
+// Abrir modal de gestión de usuarios
+async function openUserManagement() {
+  document.getElementById('userManagementModal').classList.remove('hidden');
+  await loadUsers();
+  setupUserManagementListeners();
+}
+
+// Cerrar modal de gestión de usuarios
+function closeUserManagement() {
+  document.getElementById('userManagementModal').classList.add('hidden');
+  document.getElementById('createUserForm').reset();
+}
+
+// Cerrar modal de edición de usuario
+function closeEditUser() {
+  document.getElementById('editUserModal').classList.add('hidden');
+  document.getElementById('editUserForm').reset();
+  editingUserId = null;
+}
+
+// Configurar listeners de gestión de usuarios
+function setupUserManagementListeners() {
+  // Solo configurar una vez
+  if (document.getElementById('createUserForm').hasEventListener) return;
+  
+  // Marcar que ya tiene listeners
+  document.getElementById('createUserForm').hasEventListener = true;
+  
+  // Crear usuario
+  document.getElementById('createUserForm').addEventListener('submit', handleCreateUser);
+  
+  // Editar usuario
+  document.getElementById('editUserForm').addEventListener('submit', handleEditUser);
+  
+  // Cerrar modales
+  document.getElementById('closeUserModal').addEventListener('click', closeUserManagement);
+  document.getElementById('cancelEditUser').addEventListener('click', closeEditUser);
+  
+  // Click fuera del modal para cerrar
+  document.getElementById('userManagementModal').addEventListener('click', (e) => {
+    if (e.target.id === 'userManagementModal') {
+      closeUserManagement();
+    }
+  });
+  
+  document.getElementById('editUserModal').addEventListener('click', (e) => {
+    if (e.target.id === 'editUserModal') {
+      closeEditUser();
+    }
+  });
+}
+
+// Cargar usuarios desde el servidor
+async function loadUsers() {
+  try {
+    const response = await fetch(`${API_URL}/users`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (handleAuthError(response)) return;
+    if (!response.ok) throw new Error('Error al cargar usuarios');
+    
+    users = await response.json();
+    renderUsers();
+  } catch (error) {
+    console.error('Error cargando usuarios:', error);
+    showToast('Error al cargar usuarios', 'error');
+  }
+}
+
+// Renderizar lista de usuarios
+function renderUsers() {
+  const usersList = document.getElementById('usersList');
+  
+  if (users.length === 0) {
+    usersList.innerHTML = `
+      <div class="text-center py-8 text-gray-500">
+        <i class="fas fa-users text-4xl mb-4"></i>
+        <p>No hay usuarios adicionales</p>
+      </div>
+    `;
+    return;
+  }
+  
+  usersList.innerHTML = users.map(user => {
+    const isCurrentUser = user.id === currentUser.id;
+    const createdDate = new Date(user.created_at).toLocaleDateString('es-ES');
+    
+    return `
+      <div class="bg-white border rounded-lg p-4 flex items-center justify-between hover:shadow-md transition-shadow">
+        <div class="flex items-center gap-4">
+          <div class="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+            <i class="fas fa-user text-purple-600 text-lg"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="font-semibold text-gray-800">${escapeHtml(user.username)}</span>
+              ${isCurrentUser ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Tú</span>' : ''}
+            </div>
+            ${user.email ? `<p class="text-gray-600 text-sm"><i class="fas fa-envelope mr-1"></i>${escapeHtml(user.email)}</p>` : ''}
+            <p class="text-gray-500 text-xs">Creado: ${createdDate}</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="editUser('${user.id}')" 
+            class="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm flex items-center gap-1"
+            title="Editar usuario">
+            <i class="fas fa-edit"></i>
+            <span class="hidden md:inline">Editar</span>
+          </button>
+          ${!isCurrentUser ? `
+            <button onclick="deleteUser('${user.id}', '${escapeHtml(user.username)}')" 
+              class="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm flex items-center gap-1"
+              title="Eliminar usuario">
+              <i class="fas fa-trash"></i>
+              <span class="hidden md:inline">Eliminar</span>
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Manejar creación de usuario
+async function handleCreateUser(e) {
+  e.preventDefault();
+  
+  const username = document.getElementById('newUsername').value.trim();
+  const email = document.getElementById('newEmail').value.trim();
+  const password = document.getElementById('newPassword').value;
+  
+  if (password.length < 6) {
+    showToast('La contraseña debe tener al menos 6 caracteres', 'error');
+    return;
+  }
+  
+  showLoading(true);
+  
+  try {
+    const response = await fetch(`${API_URL}/users`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ username, email, password })
+    });
+    
+    if (handleAuthError(response)) return;
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      showToast(data.error, 'error');
+      return;
+    }
+    
+    users.unshift(data);
+    renderUsers();
+    document.getElementById('createUserForm').reset();
+    showToast('Usuario creado exitosamente', 'success');
+    
+  } catch (error) {
+    console.error('Error creando usuario:', error);
+    showToast('Error al crear usuario', 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Editar usuario
+async function editUser(id) {
+  const user = users.find(u => u.id === id);
+  if (!user) return;
+  
+  editingUserId = id;
+  document.getElementById('editUserId').value = id;
+  document.getElementById('editUsername').value = user.username;
+  document.getElementById('editEmail').value = user.email || '';
+  document.getElementById('editPassword').value = '';
+  
+  document.getElementById('editUserModal').classList.remove('hidden');
+}
+
+// Manejar edición de usuario
+async function handleEditUser(e) {
+  e.preventDefault();
+  
+  if (!editingUserId) return;
+  
+  const username = document.getElementById('editUsername').value.trim();
+  const email = document.getElementById('editEmail').value.trim();
+  const password = document.getElementById('editPassword').value;
+  
+  if (password && password.length < 6) {
+    showToast('La contraseña debe tener al menos 6 caracteres', 'error');
+    return;
+  }
+  
+  showLoading(true);
+  
+  try {
+    const payload = { username, email };
+    if (password) {
+      payload.password = password;
+    }
+    
+    const response = await fetch(`${API_URL}/users/${editingUserId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload)
+    });
+    
+    if (handleAuthError(response)) return;
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      showToast(data.error, 'error');
+      return;
+    }
+    
+    const index = users.findIndex(u => u.id === editingUserId);
+    if (index !== -1) {
+      users[index] = data;
+      renderUsers();
+    }
+    
+    closeEditUser();
+    showToast('Usuario actualizado exitosamente', 'success');
+    
+    // Si es el usuario actual, actualizar la info del header
+    if (editingUserId === currentUser.id) {
+      currentUser = { ...currentUser, ...data };
+      document.getElementById('userInfo').textContent = currentUser.username;
+    }
+    
+  } catch (error) {
+    console.error('Error actualizando usuario:', error);
+    showToast('Error al actualizar usuario', 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Eliminar usuario
+async function deleteUser(id, username) {
+  if (!confirm(`¿Estás seguro de que quieres eliminar al usuario "${username}"?`)) {
+    return;
+  }
+  
+  showLoading(true);
+  
+  try {
+    const response = await fetch(`${API_URL}/users/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    
+    if (handleAuthError(response)) return;
+    
+    if (!response.ok) {
+      const data = await response.json();
+      showToast(data.error, 'error');
+      return;
+    }
+    
+    users = users.filter(u => u.id !== id);
+    renderUsers();
+    showToast('Usuario eliminado exitosamente', 'error');
+    
+  } catch (error) {
+    console.error('Error eliminando usuario:', error);
+    showToast('Error al eliminar usuario', 'error');
+  } finally {
+    showLoading(false);
+  }
+}
