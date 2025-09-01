@@ -7,7 +7,7 @@ let currentUser = null;
 
 // URL de la API (cambiar según tu configuración)
 const API_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:3333/api' 
+  ? 'http://localhost:3000/api' 
   : '/api';
 
 // Inicialización
@@ -298,6 +298,10 @@ function renderTemplates() {
                 class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar">
                 <i class="fas fa-edit"></i>
               </button>
+              <button onclick="window.location.href='editor.html?edit=${template.id}'" 
+                class="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Editor Visual">
+                <i class="fas fa-magic"></i>
+              </button>
               <button onclick="deleteTemplate('${template.id}')" 
                 class="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Eliminar">
                 <i class="fas fa-trash"></i>
@@ -319,6 +323,11 @@ function renderTemplates() {
               class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
               <i class="fas fa-copy"></i>
               Copiar Código
+            </button>
+            <button onclick="sendEmailWithTemplate('${template.id}')" 
+              class="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
+              <i class="fas fa-paper-plane"></i>
+              Enviar Email
             </button>
             <button onclick="previewTemplate('${template.id}')" 
               class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
@@ -946,3 +955,314 @@ async function deleteUser(id, username) {
     showLoading(false);
   }
 }
+
+// =================================
+// FUNCIONES DE ENVÍO DE EMAIL
+// =================================
+
+// Obtener variables de una plantilla
+async function getTemplateVariables(templateId) {
+  try {
+    const response = await fetch(`${API_URL}/templates/${templateId}/variables`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (!response.ok) {
+      console.error('Error response:', response.status, response.statusText);
+      throw new Error('Error obteniendo variables');
+    }
+    
+    const data = await response.json();
+    console.log('Variables detectadas para plantilla', templateId, ':', data.variables);
+    return data.variables || [];
+  } catch (error) {
+    console.error('Error obteniendo variables:', error);
+    return [];
+  }
+}
+
+// Función principal para enviar email con plantilla
+async function sendEmailWithTemplate(templateId) {
+  const template = templates.find(t => t.id === templateId);
+  if (!template) {
+    console.error('Plantilla no encontrada:', templateId);
+    return;
+  }
+  
+  console.log('Enviando email con plantilla:', template.title);
+  
+  // Primero obtener las variables de la plantilla
+  const variables = await getTemplateVariables(templateId);
+  console.log('Variables obtenidas:', variables);
+  
+  // Crear y mostrar el modal de envío
+  showEmailModal(template, variables);
+}
+
+// Mostrar modal de envío de email
+function showEmailModal(template, variables) {
+  console.log('showEmailModal llamado con variables:', variables);
+  
+  // Asegurar que variables es un array
+  if (!Array.isArray(variables)) {
+    console.warn('Variables no es un array, convirtiendo:', variables);
+    variables = [];
+  }
+  
+  // Crear el modal si no existe
+  let modal = document.getElementById('emailModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'emailModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center hidden';
+    document.body.appendChild(modal);
+  }
+  
+  modal.innerHTML = `
+    <div class="modal-backdrop absolute inset-0 bg-black bg-opacity-50" onclick="closeEmailModal()"></div>
+    <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden slide-in">
+      <div class="bg-gradient-to-r from-green-600 to-teal-600 text-white p-6">
+        <h2 class="text-2xl font-bold flex items-center gap-3">
+          <i class="fas fa-paper-plane"></i>
+          Enviar Email con Gmail
+        </h2>
+      </div>
+      <form id="emailForm" class="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
+        <input type="hidden" id="emailTemplateId" value="${template.id}">
+        
+        <!-- Información del destinatario -->
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <h3 class="font-bold text-blue-900 mb-3 flex items-center gap-2">
+            <i class="fas fa-user"></i> Información del Destinatario
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-gray-700 font-semibold mb-2">
+                <i class="fas fa-envelope mr-2"></i>Email del Destinatario
+              </label>
+              <input type="email" id="recipientEmail" required 
+                class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-green-500"
+                placeholder="cliente@ejemplo.com">
+            </div>
+            <div>
+              <label class="block text-gray-700 font-semibold mb-2">
+                <i class="fas fa-heading mr-2"></i>Asunto del Email
+              </label>
+              <input type="text" id="emailSubject" required 
+                class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-green-500"
+                placeholder="Asunto del correo" value="${escapeHtml(template.title)}">
+            </div>
+          </div>
+        </div>
+        
+        <!-- Variables dinámicas -->
+        ${variables.length > 0 ? `
+          <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+            <h3 class="font-bold text-yellow-900 mb-3 flex items-center gap-2">
+              <i class="fas fa-magic"></i> Personalización del Mensaje
+            </h3>
+            <p class="text-sm text-gray-600 mb-4">Esta plantilla contiene variables personalizables. Completa los valores:</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="variablesContainer">
+              ${variables.map(variable => `
+                <div>
+                  <label class="block text-gray-700 font-semibold mb-2">
+                    {{${variable}}}
+                  </label>
+                  <input type="text" 
+                    data-variable="${variable}"
+                    class="variable-input w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-yellow-500"
+                    placeholder="Valor para ${variable}">
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : '<div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 text-center text-gray-600"><i class="fas fa-info-circle mr-2"></i>Esta plantilla no contiene variables personalizables</div>'}
+        
+        <!-- Preview -->
+        <div class="mb-6">
+          <h3 class="font-bold text-gray-900 mb-3 flex items-center gap-2">
+            <i class="fas fa-eye"></i> Vista Previa del Email
+          </h3>
+          <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <iframe id="emailPreview" srcdoc="${template.html.replace(/"/g, '&quot;')}" 
+              class="w-full h-64 rounded border-0"></iframe>
+          </div>
+        </div>
+        
+        <!-- Botones -->
+        <div class="flex justify-end gap-3 pt-4 border-t">
+          <button type="button" onclick="closeEmailModal()" 
+            class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+            Cancelar
+          </button>
+          ${variables.length > 0 ? `
+            <button type="button" onclick="updateEmailPreview()" 
+              class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+              <i class="fas fa-sync"></i>
+              Actualizar Preview
+            </button>
+          ` : ''}
+          <button type="submit" 
+            class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+            <i class="fas fa-paper-plane"></i>
+            Enviar Email
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+  
+  // Agregar evento al formulario
+  document.getElementById('emailForm').addEventListener('submit', handleEmailSubmit);
+  
+  // Agregar eventos a los inputs de variables para actualizar preview automáticamente
+  document.querySelectorAll('.variable-input').forEach(input => {
+    input.addEventListener('input', debounce(updateEmailPreview, 500));
+  });
+  
+  // Mostrar el modal
+  modal.classList.remove('hidden');
+}
+
+// Cerrar modal de email
+function closeEmailModal() {
+  const modal = document.getElementById('emailModal');
+  if (modal) {
+    modal.classList.add('hidden');
+  }
+}
+
+// Actualizar preview del email
+async function updateEmailPreview() {
+  const templateId = document.getElementById('emailTemplateId').value;
+  const variables = {};
+  
+  // Recoger valores de las variables
+  document.querySelectorAll('.variable-input').forEach(input => {
+    variables[input.dataset.variable] = input.value;
+  });
+  
+  try {
+    const response = await fetch(`${API_URL}/templates/${templateId}/preview`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ variables })
+    });
+    
+    if (!response.ok) throw new Error('Error generando preview');
+    
+    const data = await response.json();
+    document.getElementById('emailPreview').srcdoc = data.html;
+    showToast('Preview actualizado', 'success');
+  } catch (error) {
+    console.error('Error actualizando preview:', error);
+    showToast('Error actualizando preview', 'error');
+  }
+}
+
+// Manejar envío del email
+async function handleEmailSubmit(e) {
+  e.preventDefault();
+  
+  const templateId = document.getElementById('emailTemplateId').value;
+  const recipientEmail = document.getElementById('recipientEmail').value;
+  const subject = document.getElementById('emailSubject').value;
+  
+  // Recoger valores de las variables
+  const variables = {};
+  document.querySelectorAll('.variable-input').forEach(input => {
+    variables[input.dataset.variable] = input.value;
+  });
+  
+  showLoading(true);
+  
+  try {
+    // Enviar email usando el backend
+    const response = await fetch(`${API_URL}/templates/${templateId}/send`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        to: recipientEmail,
+        subject: subject,
+        variables: variables
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error || 'Error enviando email');
+    }
+    
+    showToast('✅ ¡Email enviado exitosamente!', 'success');
+    closeEmailModal();
+    
+    // Guardar en historial local (opcional)
+    const history = JSON.parse(localStorage.getItem('emailHistory') || '[]');
+    history.unshift({
+      to: recipientEmail,
+      subject: subject,
+      templateId: templateId,
+      variables: variables,
+      sentAt: new Date().toISOString()
+    });
+    localStorage.setItem('emailHistory', JSON.stringify(history.slice(0, 50))); // Mantener últimos 50
+    
+  } catch (error) {
+    console.error('Error:', error);
+    
+    if (error.message.includes('EMAIL_USER') || error.message.includes('EMAIL_PASS')) {
+      showToast('⚠️ Email no configurado en el servidor. Configura el archivo .env', 'error');
+      alert(`Para configurar el envío de emails:
+      
+1. Abre el archivo .env en la raíz del proyecto
+2. Añade tu email de Gmail: EMAIL_USER=tu-email@gmail.com
+3. Genera una contraseña de aplicación en Gmail:
+   - Ve a https://myaccount.google.com/security
+   - Activa verificación en 2 pasos
+   - Busca "Contraseñas de aplicaciones"
+   - Genera una nueva para "Correo"
+4. Añade la contraseña: EMAIL_PASS=tu-contraseña-de-16-caracteres
+5. Reinicia el servidor`);
+    } else {
+      showToast('❌ ' + error.message, 'error');
+    }
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+// Función de debounce para optimizar actualizaciones
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+// Hacer global las funciones que necesita el HTML
+window.editTemplate = editTemplate;
+window.deleteTemplate = deleteTemplate;
+window.syncTemplate = syncTemplate;
+window.copyTemplate = copyTemplate;
+window.previewTemplate = previewTemplate;
+window.sendEmailWithTemplate = sendEmailWithTemplate;
+window.closeEmailModal = closeEmailModal;
+window.updateEmailPreview = updateEmailPreview;
+window.openUserManagement = openUserManagement;
+window.closeUserManagement = closeUserManagement;
+window.closeEditUser = closeEditUser;
+window.editUser = editUser;
+window.deleteUser = deleteUser;

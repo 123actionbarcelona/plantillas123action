@@ -6,6 +6,7 @@
     <title>Gestor de Plantillas de Correo</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
     <style>
         .template-preview {
             max-height: 300px;
@@ -116,6 +117,10 @@
                     <button id="addTemplateBtn" class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-md hover:shadow-lg">
                         <i class="fas fa-plus-circle"></i>
                         Nueva Plantilla
+                    </button>
+                    <button onclick="window.location.href='editor.html'" class="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all flex items-center gap-2 shadow-md hover:shadow-lg">
+                        <i class="fas fa-magic"></i>
+                        Editor Visual
                     </button>
                     <button id="logoutBtn" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
                         <i class="fas fa-sign-out-alt"></i>

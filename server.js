@@ -5,10 +5,21 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'tu-clave-secreta-super-segura-2024';
+
+// Configurar Nodemailer
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
 
 // Middleware
 app.use(cors());
@@ -537,6 +548,168 @@ app.get('/api/stats', authenticateToken, (req, res) => {
       });
     }
   );
+});
+
+// ==========================================
+// NUEVAS FUNCIONALIDADES: SISTEMA DE VARIABLES
+// ==========================================
+
+// Función para extraer variables de una plantilla HTML
+function extractVariables(html) {
+  // Primero convertir variables de formato $json.variable a variable simple
+  html = html.replace(/\{\{\$json\.(\w+)\}\}/g, '{{$1}}');
+  
+  // Ahora extraer las variables normales
+  const regex = /\{\{([\w_]+)\}\}/g;
+  const variables = new Set();
+  let match;
+  
+  while ((match = regex.exec(html)) !== null) {
+    variables.add(match[1]);
+  }
+  
+  return Array.from(variables);
+}
+
+// Función para reemplazar variables con valores
+function replaceVariables(html, values) {
+  let result = html;
+  
+  // Primero convertir variables de formato $json.variable a variable simple
+  result = result.replace(/\{\{\$json\.(\w+)\}\}/g, '{{$1}}');
+  
+  // Ahora reemplazar las variables con sus valores
+  for (const [key, value] of Object.entries(values)) {
+    // Reemplazar tanto {{variable}} como {{$json.variable}}
+    const regex1 = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+    const regex2 = new RegExp(`\\{\\{\\$json\\.${key}\\}\\}`, 'g');
+    result = result.replace(regex1, value || '');
+    result = result.replace(regex2, value || '');
+  }
+  
+  return result;
+}
+
+// Obtener variables de una plantilla
+app.get('/api/templates/:id/variables', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  
+  db.get("SELECT html FROM templates WHERE id = ?", [id], (err, row) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    if (!row) {
+      res.status(404).json({ error: 'Plantilla no encontrada' });
+      return;
+    }
+    
+    const variables = extractVariables(row.html);
+    res.json({ variables });
+  });
+});
+
+// Preview de plantilla con variables reemplazadas
+app.post('/api/templates/:id/preview', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  const { variables } = req.body;
+  
+  db.get("SELECT * FROM templates WHERE id = ?", [id], (err, row) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    if (!row) {
+      res.status(404).json({ error: 'Plantilla no encontrada' });
+      return;
+    }
+    
+    const processedHtml = replaceVariables(row.html, variables || {});
+    
+    res.json({
+      ...row,
+      html: processedHtml,
+      originalVariables: extractVariables(row.html)
+    });
+  });
+});
+
+// ==========================================
+// ENDPOINT DE ENVÍO DE EMAILS CON NODEMAILER
+// ==========================================
+
+// Enviar email con plantilla
+app.post('/api/templates/:id/send', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { to, subject, variables } = req.body;
+  
+  // Validar entrada
+  if (!to || !subject) {
+    return res.status(400).json({ error: 'Destinatario y asunto son requeridos' });
+  }
+  
+  // Verificar configuración de email
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    return res.status(500).json({ 
+      error: 'Email no configurado. Por favor configura EMAIL_USER y EMAIL_PASS en el archivo .env' 
+    });
+  }
+  
+  try {
+    // Obtener la plantilla
+    const template = await new Promise((resolve, reject) => {
+      db.get("SELECT * FROM templates WHERE id = ?", [id], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    if (!template) {
+      return res.status(404).json({ error: 'Plantilla no encontrada' });
+    }
+    
+    // Procesar HTML con variables
+    const processedHtml = replaceVariables(template.html, variables || {});
+    
+    // Configurar el email
+    const mailOptions = {
+      from: `"Gestor de Plantillas" <${process.env.EMAIL_USER}>`,
+      to: to,
+      subject: subject,
+      html: processedHtml
+    };
+    
+    // Enviar el email
+    const info = await transporter.sendMail(mailOptions);
+    
+    // Responder con éxito
+    res.json({
+      success: true,
+      message: 'Email enviado exitosamente',
+      messageId: info.messageId,
+      accepted: info.accepted
+    });
+    
+  } catch (error) {
+    console.error('Error enviando email:', error);
+    
+    // Mensajes de error específicos
+    if (error.code === 'EAUTH') {
+      res.status(500).json({ 
+        error: 'Error de autenticación. Verifica EMAIL_USER y EMAIL_PASS en .env' 
+      });
+    } else if (error.code === 'ECONNECTION') {
+      res.status(500).json({ 
+        error: 'Error de conexión con Gmail. Verifica tu conexión a internet' 
+      });
+    } else {
+      res.status(500).json({ 
+        error: 'Error enviando email: ' + error.message 
+      });
+    }
+  }
 });
 
 // Iniciar servidor
