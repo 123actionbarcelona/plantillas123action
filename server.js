@@ -429,31 +429,81 @@ app.delete('/api/users/:id', authenticateToken, (req, res) => {
 
 // Obtener todas las plantillas
 app.get('/api/templates', authenticateToken, (req, res) => {
-  const { category } = req.query;
+  const { category, tags } = req.query;
   
   let query = `
     SELECT 
       t.*,
       c.name as category_name,
       c.color as category_color,
-      c.icon as category_icon
+      c.icon as category_icon,
+      GROUP_CONCAT(tg.id) as tag_ids,
+      GROUP_CONCAT(tg.name) as tag_names,
+      GROUP_CONCAT(tg.color) as tag_colors,
+      GROUP_CONCAT(tg.icon) as tag_icons
     FROM templates t
     LEFT JOIN categories c ON t.category_id = c.id
+    LEFT JOIN template_tags tt ON t.id = tt.template_id
+    LEFT JOIN tags tg ON tt.tag_id = tg.id
   `;
   
   const params = [];
+  const conditions = [];
+  
   if (category) {
-    query += " WHERE t.category_id = ?";
+    conditions.push("t.category_id = ?");
     params.push(category);
   }
   
-  query += " ORDER BY t.updated_at DESC";
+  if (tags) {
+    // Filtrar por tags (puede ser uno o varios separados por coma)
+    const tagList = tags.split(',');
+    const tagPlaceholders = tagList.map(() => '?').join(',');
+    conditions.push(`t.id IN (
+      SELECT DISTINCT template_id 
+      FROM template_tags 
+      WHERE tag_id IN (${tagPlaceholders})
+    )`);
+    params.push(...tagList);
+  }
+  
+  if (conditions.length > 0) {
+    query += " WHERE " + conditions.join(" AND ");
+  }
+  
+  query += " GROUP BY t.id ORDER BY t.updated_at DESC";
   
   db.all(query, params, (err, rows) => {
     if (err) {
       res.status(500).json({ error: err.message });
       return;
     }
+    
+    // Procesar los tags para cada plantilla
+    rows.forEach(row => {
+      if (row.tag_ids) {
+        const tagIds = row.tag_ids.split(',');
+        const tagNames = row.tag_names.split(',');
+        const tagColors = row.tag_colors.split(',');
+        const tagIcons = row.tag_icons ? row.tag_icons.split(',') : [];
+        
+        row.tags = tagIds.map((id, index) => ({
+          id: id,
+          name: tagNames[index],
+          color: tagColors[index],
+          icon: tagIcons[index] || null
+        }));
+      } else {
+        row.tags = [];
+      }
+      
+      // Limpiar campos temporales
+      delete row.tag_ids;
+      delete row.tag_names;
+      delete row.tag_colors;
+      delete row.tag_icons;
+    });
+    
     res.json(rows);
   });
 });
@@ -786,6 +836,210 @@ app.post('/api/templates/assign-category', authenticateToken, (req, res) => {
     res.json({ 
       message: 'Categorías asignadas exitosamente',
       affected: this.changes 
+    });
+  });
+});
+
+// ==========================================
+// SISTEMA DE TAGS/ETIQUETAS
+// ==========================================
+
+// Obtener todos los tags
+app.get('/api/tags', authenticateToken, (req, res) => {
+  db.all("SELECT * FROM tags ORDER BY order_index ASC", (err, rows) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    res.json(rows);
+  });
+});
+
+// Obtener un tag por ID
+app.get('/api/tags/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  db.get("SELECT * FROM tags WHERE id = ?", [id], (err, row) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    if (!row) {
+      res.status(404).json({ error: 'Tag no encontrado' });
+      return;
+    }
+    res.json(row);
+  });
+});
+
+// Crear nuevo tag
+app.post('/api/tags', authenticateToken, (req, res) => {
+  const { name, color, icon } = req.body;
+  const id = 'tag-' + uuidv4();
+  
+  db.get("SELECT MAX(order_index) as maxOrder FROM tags", (err, row) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    const nextOrder = (row?.maxOrder || 0) + 1;
+    
+    db.run(
+      "INSERT INTO tags (id, name, color, icon, order_index) VALUES (?, ?, ?, ?, ?)",
+      [id, name, color || '#9ca3af', icon || null, nextOrder],
+      function(err) {
+        if (err) {
+          if (err.message.includes('UNIQUE')) {
+            res.status(400).json({ error: 'Ya existe un tag con ese nombre' });
+          } else {
+            res.status(500).json({ error: err.message });
+          }
+          return;
+        }
+        
+        db.get("SELECT * FROM tags WHERE id = ?", [id], (err, row) => {
+          if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+          }
+          res.status(201).json(row);
+        });
+      }
+    );
+  });
+});
+
+// Actualizar tag
+app.put('/api/tags/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  const { name, color, icon } = req.body;
+  
+  db.run(
+    "UPDATE tags SET name = ?, color = ?, icon = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [name, color, icon, id],
+    function(err) {
+      if (err) {
+        if (err.message.includes('UNIQUE')) {
+          res.status(400).json({ error: 'Ya existe un tag con ese nombre' });
+        } else {
+          res.status(500).json({ error: err.message });
+        }
+        return;
+      }
+      
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Tag no encontrado' });
+        return;
+      }
+      
+      db.get("SELECT * FROM tags WHERE id = ?", [id], (err, row) => {
+        if (err) {
+          res.status(500).json({ error: err.message });
+          return;
+        }
+        res.json(row);
+      });
+    }
+  );
+});
+
+// Eliminar tag
+app.delete('/api/tags/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  
+  // Primero eliminar las relaciones en template_tags
+  db.run("DELETE FROM template_tags WHERE tag_id = ?", [id], (err) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    db.run("DELETE FROM tags WHERE id = ?", [id], function(err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Tag no encontrado' });
+        return;
+      }
+      
+      res.json({ message: 'Tag eliminado exitosamente' });
+    });
+  });
+});
+
+// Obtener tags de una plantilla
+app.get('/api/templates/:id/tags', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  
+  db.all(
+    `SELECT t.* FROM tags t
+     INNER JOIN template_tags tt ON t.id = tt.tag_id
+     WHERE tt.template_id = ?
+     ORDER BY t.name`,
+    [id],
+    (err, rows) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      res.json(rows);
+    }
+  );
+});
+
+// Asignar tags a una plantilla
+app.post('/api/templates/:id/tags', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  const { tagIds } = req.body;
+  
+  if (!Array.isArray(tagIds)) {
+    return res.status(400).json({ error: 'Se requiere un array de IDs de tags' });
+  }
+  
+  // Primero eliminar tags existentes
+  db.run("DELETE FROM template_tags WHERE template_id = ?", [id], (err) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    // Si no hay tags nuevos, terminar aquí
+    if (tagIds.length === 0) {
+      res.json({ message: 'Tags actualizados', tags: [] });
+      return;
+    }
+    
+    // Insertar nuevos tags
+    const stmt = db.prepare("INSERT INTO template_tags (template_id, tag_id) VALUES (?, ?)");
+    
+    tagIds.forEach(tagId => {
+      stmt.run(id, tagId);
+    });
+    
+    stmt.finalize((err) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      
+      // Devolver los tags actualizados
+      db.all(
+        `SELECT t.* FROM tags t
+         INNER JOIN template_tags tt ON t.id = tt.tag_id
+         WHERE tt.template_id = ?
+         ORDER BY t.name`,
+        [id],
+        (err, rows) => {
+          if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+          }
+          res.json({ message: 'Tags actualizados', tags: rows });
+        }
+      );
     });
   });
 });

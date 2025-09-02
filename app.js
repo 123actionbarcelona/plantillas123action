@@ -2,7 +2,9 @@
 let templates = [];
 let filteredTemplates = [];
 let categories = [];
+let tags = [];
 let selectedCategory = 'all';
+let selectedTags = new Set();
 let editingId = null;
 let authToken = null;
 let currentUser = null;
@@ -81,6 +83,7 @@ function showMainApp() {
   setupEventListeners();
   loadTemplates();
   loadCategories();
+  loadTags();
   updateStats();
   
   // Auto-actualizar cada 30 segundos para sincronización
@@ -315,6 +318,18 @@ function renderTemplates() {
               </div>
               <h3 class="text-xl font-bold text-gray-800 mb-2">${escapeHtml(template.title)}</h3>
               <p class="text-gray-600 text-sm">${escapeHtml(template.description)}</p>
+              ${template.tags && template.tags.length > 0 ? `
+                <div class="template-tags">
+                  ${template.tags.map(tag => `
+                    <span class="template-tag" 
+                          style="background-color: ${tag.color}20; color: ${tag.color}"
+                          onclick="toggleTagFilter('${tag.id}')">
+                      ${tag.icon ? `<i class="fas ${tag.icon}"></i>` : ''}
+                      ${escapeHtml(tag.name)}
+                    </span>
+                  `).join('')}
+                </div>
+              ` : ''}
             </div>
             <div class="flex gap-2">
               <button onclick="showQuickCategoryMenu(event, '${template.id}')" 
@@ -381,6 +396,7 @@ async function addTemplate() {
   const description = document.getElementById('templateDescription').value;
   const html = document.getElementById('templateHTML').value;
   const category_id = document.getElementById('templateCategory').value || null;
+  const tagIds = getSelectedTags('templateTags');
   
   showLoading(true);
   
@@ -395,9 +411,22 @@ async function addTemplate() {
     if (!response.ok) throw new Error('Error al crear plantilla');
     
     const newTemplate = await response.json();
-    templates.unshift(newTemplate);
-    filteredTemplates = [...templates];
-    renderTemplates();
+    
+    // Asignar tags si hay alguno seleccionado
+    if (tagIds.length > 0) {
+      await fetch(`${API_URL}/templates/${newTemplate.id}/tags`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ tagIds })
+      });
+      // Recargar para obtener los tags
+      await loadTemplates();
+    } else {
+      templates.unshift(newTemplate);
+      filteredTemplates = [...templates];
+      renderTemplates();
+    }
+    
     closeAddModal();
     showToast('Plantilla agregada exitosamente');
     updateStats();
@@ -429,6 +458,10 @@ async function editTemplate(id) {
     categorySelect.value = template.category_id || '';
   }
   
+  // Cargar tags seleccionados
+  const templateTagIds = template.tags ? template.tags.map(t => t.id) : [];
+  setSelectedTags('editTemplateTags', templateTagIds);
+  
   document.getElementById('editTemplateModal').classList.remove('hidden');
 }
 
@@ -440,6 +473,7 @@ async function updateTemplate() {
   const description = document.getElementById('editTemplateDescription').value;
   const html = document.getElementById('editTemplateHTML').value;
   const category_id = document.getElementById('editTemplateCategory')?.value || null;
+  const tagIds = getSelectedTags('editTemplateTags');
   
   showLoading(true);
   
@@ -454,12 +488,16 @@ async function updateTemplate() {
     if (!response.ok) throw new Error('Error al actualizar plantilla');
     
     const updatedTemplate = await response.json();
-    const index = templates.findIndex(t => t.id === editingId);
-    if (index !== -1) {
-      templates[index] = updatedTemplate;
-      filteredTemplates = [...templates];
-      renderTemplates();
-    }
+    
+    // Actualizar tags
+    await fetch(`${API_URL}/templates/${editingId}/tags`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ tagIds })
+    });
+    
+    // Recargar plantillas para obtener los tags actualizados
+    await loadTemplates();
     
     closeEditModal();
     showToast('Plantilla actualizada exitosamente');
@@ -1354,14 +1392,7 @@ function renderCategoryFilters() {
 function filterByCategory(categoryId) {
   selectedCategory = categoryId;
   updateActiveChip();
-  
-  if (categoryId === 'all') {
-    filteredTemplates = templates;
-  } else {
-    filteredTemplates = templates.filter(t => t.category_id === categoryId);
-  }
-  
-  renderTemplates(filteredTemplates);
+  filterTemplates();
 }
 
 // Actualizar chip activo
@@ -1873,3 +1904,387 @@ window.showQuickCategoryMenu = showQuickCategoryMenu;
 window.assignCategoryBulk = assignCategoryBulk;
 window.deleteBulk = deleteBulk;
 window.cancelBulkSelection = cancelBulkSelection;
+
+// =================================
+// SISTEMA DE TAGS
+// =================================
+
+// Cargar tags
+async function loadTags() {
+  try {
+    const response = await fetch(`${API_URL}/tags`, {
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Error cargando tags');
+    
+    tags = await response.json();
+    renderTagFilters();
+    updateTagCheckboxes();
+    
+  } catch (error) {
+    console.error('Error cargando tags:', error);
+    tags = [];
+  }
+}
+
+// Renderizar filtros de tags
+function renderTagFilters() {
+  const container = document.getElementById('tagFilters');
+  if (!container) return;
+  
+  // Mantener el botón "Todos"
+  const allButton = container.querySelector('[data-tag="all"]');
+  container.innerHTML = '';
+  if (allButton) container.appendChild(allButton);
+  
+  tags.forEach(tag => {
+    const chip = document.createElement('button');
+    chip.dataset.tagId = tag.id;
+    chip.className = 'tag-chip px-3 py-1.5 rounded-full text-white transition-all';
+    chip.style.backgroundColor = tag.color;
+    chip.innerHTML = `
+      ${tag.icon ? `<i class="fas ${tag.icon} mr-1"></i>` : ''}
+      ${tag.name}
+    `;
+    chip.addEventListener('click', () => toggleTagFilter(tag.id));
+    container.appendChild(chip);
+  });
+}
+
+// Toggle filtro de tag
+function toggleTagFilter(tagId) {
+  if (tagId === 'all') {
+    selectedTags.clear();
+  } else {
+    if (selectedTags.has(tagId)) {
+      selectedTags.delete(tagId);
+    } else {
+      selectedTags.add(tagId);
+    }
+  }
+  
+  updateActiveTagChips();
+  filterTemplates();
+}
+
+// Actualizar chips activos
+function updateActiveTagChips() {
+  document.querySelectorAll('.tag-chip').forEach(chip => {
+    const tagId = chip.dataset.tagId;
+    if (tagId === 'all' && selectedTags.size === 0) {
+      chip.classList.add('active');
+    } else if (selectedTags.has(tagId)) {
+      chip.classList.add('active');
+    } else {
+      chip.classList.remove('active');
+    }
+  });
+}
+
+// Filtrar plantillas por categoría y tags
+function filterTemplates() {
+  filteredTemplates = templates.filter(template => {
+    // Filtro de categoría
+    if (selectedCategory !== 'all' && template.category_id !== selectedCategory) {
+      return false;
+    }
+    
+    // Filtro de tags
+    if (selectedTags.size > 0) {
+      const templateTagIds = template.tags ? template.tags.map(t => t.id) : [];
+      const hasAllTags = Array.from(selectedTags).every(tagId => 
+        templateTagIds.includes(tagId)
+      );
+      if (!hasAllTags) return false;
+    }
+    
+    return true;
+  });
+  
+  renderTemplates(filteredTemplates);
+}
+
+// Actualizar checkboxes de tags en formularios
+function updateTagCheckboxes() {
+  updateTagCheckboxesInContainer('templateTags');
+  updateTagCheckboxesInContainer('editTemplateTags');
+}
+
+function updateTagCheckboxesInContainer(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  
+  container.innerHTML = '';
+  tags.forEach(tag => {
+    const label = document.createElement('label');
+    label.className = 'flex items-center gap-2 mb-2 cursor-pointer hover:bg-gray-50 p-1 rounded';
+    label.innerHTML = `
+      <input type="checkbox" value="${tag.id}" class="tag-checkbox">
+      <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs" 
+            style="background-color: ${tag.color}20; color: ${tag.color}">
+        ${tag.icon ? `<i class="fas ${tag.icon}"></i>` : ''}
+        ${tag.name}
+      </span>
+    `;
+    container.appendChild(label);
+  });
+}
+
+// Obtener tags seleccionados de un formulario
+function getSelectedTags(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return [];
+  
+  const checkboxes = container.querySelectorAll('.tag-checkbox:checked');
+  return Array.from(checkboxes).map(cb => cb.value);
+}
+
+// Establecer tags seleccionados en un formulario
+function setSelectedTags(containerId, tagIds) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  
+  container.querySelectorAll('.tag-checkbox').forEach(cb => {
+    cb.checked = tagIds.includes(cb.value);
+  });
+}
+
+// Abrir modal de tags
+function openTagsModal() {
+  document.getElementById('tagsModal').classList.remove('hidden');
+  loadTagsList();
+}
+
+// Cerrar modal de tags
+function closeTagsModal() {
+  document.getElementById('tagsModal').classList.add('hidden');
+}
+
+// Cargar lista de tags con estadísticas
+async function loadTagsList() {
+  const tbody = document.getElementById('tagsList');
+  tbody.innerHTML = '';
+  
+  // Contar uso de cada tag
+  const tagUsage = {};
+  tags.forEach(tag => {
+    tagUsage[tag.id] = templates.filter(t => 
+      t.tags && t.tags.some(tt => tt.id === tag.id)
+    ).length;
+  });
+  
+  tags.forEach(tag => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="px-4 py-3 font-medium">
+        <span class="inline-flex items-center gap-1">
+          ${tag.icon ? `<i class="fas ${tag.icon}"></i>` : ''}
+          ${tag.name}
+        </span>
+      </td>
+      <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded" style="background-color: ${tag.color}"></div>
+          <span class="text-sm text-gray-600">${tag.color}</span>
+        </div>
+      </td>
+      <td class="px-4 py-3">
+        ${tag.icon ? `<i class="fas ${tag.icon}"></i>` : '-'}
+      </td>
+      <td class="px-4 py-3">
+        <span class="bg-gray-100 px-2 py-1 rounded text-sm">${tagUsage[tag.id] || 0}</span>
+      </td>
+      <td class="px-4 py-3 text-right">
+        <button onclick="editTag('${tag.id}')" class="text-purple-600 hover:text-purple-800 mr-2">
+          <i class="fas fa-edit"></i>
+        </button>
+        <button onclick="deleteTag('${tag.id}')" class="text-red-600 hover:text-red-800">
+          <i class="fas fa-trash"></i>
+        </button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// Añadir tag
+async function addTag(e) {
+  e.preventDefault();
+  
+  const name = document.getElementById('tagName').value;
+  const color = document.getElementById('tagColor').value;
+  const icon = document.getElementById('tagIcon').value;
+  
+  try {
+    const response = await fetch(`${API_URL}/tags`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({ name, color, icon })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Error creando tag');
+    }
+    
+    showToast('Tag creado exitosamente');
+    document.getElementById('addTagForm').reset();
+    loadTags();
+    loadTagsList();
+    
+  } catch (error) {
+    console.error('Error:', error);
+    showToast(error.message, 'error');
+  }
+}
+
+// Editar tag
+async function editTag(tagId) {
+  const tag = tags.find(t => t.id === tagId);
+  if (!tag) return;
+  
+  document.getElementById('editTagId').value = tag.id;
+  document.getElementById('editTagName').value = tag.name;
+  document.getElementById('editTagColor').value = tag.color;
+  document.getElementById('editTagColorText').value = tag.color;
+  document.getElementById('editTagIcon').value = tag.icon || '';
+  
+  updateTagIconPreview(tag.icon);
+  document.getElementById('editTagModal').classList.remove('hidden');
+}
+
+// Cerrar modal de edición de tag
+function closeEditTagModal() {
+  document.getElementById('editTagModal').classList.add('hidden');
+}
+
+// Actualizar preview del icono de tag
+function updateTagIconPreview(icon) {
+  const preview = document.getElementById('editTagIconPreview');
+  if (icon) {
+    preview.innerHTML = `<i class="fas ${icon}"></i>`;
+  } else {
+    preview.innerHTML = '<i class="fas fa-question text-gray-400"></i>';
+  }
+}
+
+// Guardar cambios de tag
+async function saveTagChanges(e) {
+  e.preventDefault();
+  
+  const id = document.getElementById('editTagId').value;
+  const name = document.getElementById('editTagName').value;
+  const color = document.getElementById('editTagColor').value;
+  const icon = document.getElementById('editTagIcon').value;
+  
+  try {
+    const response = await fetch(`${API_URL}/tags/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({ name, color, icon })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Error actualizando tag');
+    }
+    
+    showToast('Tag actualizado exitosamente');
+    closeEditTagModal();
+    loadTags();
+    loadTagsList();
+    loadTemplates();
+    
+  } catch (error) {
+    console.error('Error:', error);
+    showToast(error.message, 'error');
+  }
+}
+
+// Eliminar tag
+async function deleteTag(id) {
+  if (!confirm('¿Estás seguro de eliminar este tag? Se quitará de todas las plantillas.')) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`${API_URL}/tags/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Error eliminando tag');
+    
+    showToast('Tag eliminado exitosamente');
+    loadTags();
+    loadTagsList();
+    loadTemplates();
+    
+  } catch (error) {
+    console.error('Error:', error);
+    showToast('Error eliminando tag', 'error');
+  }
+}
+
+// Event listeners para tags
+document.addEventListener('DOMContentLoaded', () => {
+  // Formulario de añadir tag
+  const addTagForm = document.getElementById('addTagForm');
+  if (addTagForm) {
+    addTagForm.addEventListener('submit', addTag);
+  }
+  
+  // Formulario de editar tag
+  const editTagForm = document.getElementById('editTagForm');
+  if (editTagForm) {
+    editTagForm.addEventListener('submit', saveTagChanges);
+  }
+  
+  // Sincronizar color picker con texto para tags
+  const tagColorPicker = document.getElementById('editTagColor');
+  const tagColorText = document.getElementById('editTagColorText');
+  
+  if (tagColorPicker && tagColorText) {
+    tagColorPicker.addEventListener('change', (e) => {
+      tagColorText.value = e.target.value;
+    });
+    
+    tagColorText.addEventListener('input', (e) => {
+      if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) {
+        tagColorPicker.value = e.target.value;
+      }
+    });
+  }
+  
+  // Preview del icono de tag
+  const tagIconInput = document.getElementById('editTagIcon');
+  if (tagIconInput) {
+    tagIconInput.addEventListener('input', (e) => {
+      updateTagIconPreview(e.target.value);
+    });
+  }
+  
+  // Filtro "Todos" para tags
+  const allTagChip = document.querySelector('[data-tag="all"]');
+  if (allTagChip) {
+    allTagChip.addEventListener('click', () => toggleTagFilter('all'));
+  }
+});
+
+// Exportar funciones de tags
+window.openTagsModal = openTagsModal;
+window.closeTagsModal = closeTagsModal;
+window.editTag = editTag;
+window.closeEditTagModal = closeEditTagModal;
+window.deleteTag = deleteTag;
