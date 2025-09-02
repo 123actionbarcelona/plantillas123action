@@ -1,6 +1,8 @@
 // Estado de la aplicación
 let templates = [];
 let filteredTemplates = [];
+let categories = [];
+let selectedCategory = 'all';
 let editingId = null;
 let authToken = null;
 let currentUser = null;
@@ -78,6 +80,7 @@ function showMainApp() {
   
   setupEventListeners();
   loadTemplates();
+  loadCategories();
   updateStats();
   
   // Auto-actualizar cada 30 segundos para sincronización
@@ -184,6 +187,15 @@ function setupEventListeners() {
   // Botón gestionar usuarios
   document.getElementById('manageUsersBtn').addEventListener('click', openUserManagement);
   
+  // Botón gestionar categorías
+  const manageCatBtn = document.getElementById('manageCategoriesBtn');
+  if (manageCatBtn) {
+    manageCatBtn.addEventListener('click', openCategoriesModal);
+    console.log('Event listener añadido a manageCategoriesBtn');
+  } else {
+    console.error('Botón manageCategoriesBtn no encontrado');
+  }
+  
   // Botón agregar plantilla
   document.getElementById('addTemplateBtn').addEventListener('click', () => {
     openAddModal();
@@ -285,15 +297,30 @@ function renderTemplates() {
   
   emptyState.classList.add('hidden');
   grid.innerHTML = filteredTemplates.map((template) => {
+    const categoryColor = template.category_color || '#6b7280';
+    const categoryName = template.category_name || 'Sin categoría';
+    const categoryIcon = template.category_icon || '';
+    
     return `
-      <div class="bg-white rounded-lg shadow-lg hover:shadow-xl transition-shadow duration-300 overflow-hidden template-card" data-id="${template.id}">
+      <div class="bg-white rounded-lg shadow-lg hover:shadow-xl transition-shadow duration-300 overflow-hidden template-card relative" data-id="${template.id}">
+        <div class="category-border" style="background-color: ${categoryColor}"></div>
         <div class="p-6">
           <div class="flex justify-between items-start mb-4">
-            <div>
+            <div class="flex-1">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="category-badge" style="background-color: ${categoryColor}20; color: ${categoryColor}">
+                  ${categoryIcon ? `<i class="fas ${categoryIcon} text-xs"></i>` : ''}
+                  ${escapeHtml(categoryName)}
+                </span>
+              </div>
               <h3 class="text-xl font-bold text-gray-800 mb-2">${escapeHtml(template.title)}</h3>
               <p class="text-gray-600 text-sm">${escapeHtml(template.description)}</p>
             </div>
             <div class="flex gap-2">
+              <button onclick="showQuickCategoryMenu(event, '${template.id}')" 
+                class="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Cambiar categoría">
+                <i class="fas fa-tag"></i>
+              </button>
               <button onclick="editTemplate('${template.id}')" 
                 class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar">
                 <i class="fas fa-edit"></i>
@@ -353,6 +380,7 @@ async function addTemplate() {
   const title = document.getElementById('templateTitle').value;
   const description = document.getElementById('templateDescription').value;
   const html = document.getElementById('templateHTML').value;
+  const category_id = document.getElementById('templateCategory').value || null;
   
   showLoading(true);
   
@@ -360,7 +388,7 @@ async function addTemplate() {
     const response = await fetch(`${API_URL}/templates`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ title, description, html })
+      body: JSON.stringify({ title, description, html, category_id })
     });
     
     if (handleAuthError(response)) return;
@@ -395,6 +423,12 @@ async function editTemplate(id) {
   document.getElementById('editTemplateDescription').value = template.description;
   document.getElementById('editTemplateHTML').value = template.html;
   
+  // Cargar categoría si existe
+  const categorySelect = document.getElementById('editTemplateCategory');
+  if (categorySelect) {
+    categorySelect.value = template.category_id || '';
+  }
+  
   document.getElementById('editTemplateModal').classList.remove('hidden');
 }
 
@@ -405,6 +439,7 @@ async function updateTemplate() {
   const title = document.getElementById('editTemplateTitle').value;
   const description = document.getElementById('editTemplateDescription').value;
   const html = document.getElementById('editTemplateHTML').value;
+  const category_id = document.getElementById('editTemplateCategory')?.value || null;
   
   showLoading(true);
   
@@ -412,7 +447,7 @@ async function updateTemplate() {
     const response = await fetch(`${API_URL}/templates/${editingId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ title, description, html })
+      body: JSON.stringify({ title, description, html, category_id })
     });
     
     if (handleAuthError(response)) return;
@@ -1266,3 +1301,473 @@ window.closeUserManagement = closeUserManagement;
 window.closeEditUser = closeEditUser;
 window.editUser = editUser;
 window.deleteUser = deleteUser;
+
+// =================================
+// FUNCIONES DE CATEGORÍAS
+// =================================
+
+// Cargar categorías
+async function loadCategories() {
+  try {
+    const response = await fetch(`${API_URL}/categories`, {
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Error cargando categorías');
+    
+    categories = await response.json();
+    renderCategoryFilters();
+    updateCategorySelects();
+    
+  } catch (error) {
+    console.error('Error cargando categorías:', error);
+    categories = [];
+  }
+}
+
+// Renderizar filtros de categoría
+function renderCategoryFilters() {
+  const container = document.getElementById('categoryFilters');
+  const currentFilters = container.querySelectorAll('.category-chip:not([data-category="all"])');
+  currentFilters.forEach(chip => chip.remove());
+  
+  categories.forEach(category => {
+    const chip = document.createElement('button');
+    chip.dataset.category = category.id;
+    chip.className = 'category-chip px-4 py-2 rounded-full text-white transition-all';
+    chip.style.backgroundColor = category.color;
+    chip.innerHTML = `
+      ${category.icon ? `<i class="fas ${category.icon} mr-2"></i>` : ''}
+      ${category.name}
+    `;
+    chip.addEventListener('click', () => filterByCategory(category.id));
+    container.appendChild(chip);
+  });
+  
+  // Actualizar chip activo
+  updateActiveChip();
+}
+
+// Filtrar por categoría
+function filterByCategory(categoryId) {
+  selectedCategory = categoryId;
+  updateActiveChip();
+  
+  if (categoryId === 'all') {
+    filteredTemplates = templates;
+  } else {
+    filteredTemplates = templates.filter(t => t.category_id === categoryId);
+  }
+  
+  renderTemplates(filteredTemplates);
+}
+
+// Actualizar chip activo
+function updateActiveChip() {
+  document.querySelectorAll('.category-chip').forEach(chip => {
+    if (chip.dataset.category === selectedCategory) {
+      chip.classList.add('active');
+    } else {
+      chip.classList.remove('active');
+    }
+  });
+}
+
+// Actualizar selects de categorías
+function updateCategorySelects() {
+  const selects = ['templateCategory', 'editTemplateCategory'];
+  
+  selects.forEach(selectId => {
+    const select = document.getElementById(selectId);
+    if (select) {
+      select.innerHTML = '<option value="">Sin categoría</option>';
+      categories.forEach(category => {
+        const option = document.createElement('option');
+        option.value = category.id;
+        option.textContent = category.name;
+        select.appendChild(option);
+      });
+    }
+  });
+}
+
+// Abrir modal de categorías
+function openCategoriesModal() {
+  console.log('Abriendo modal de categorías...');
+  const modal = document.getElementById('categoriesModal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    loadCategoryStats();
+  } else {
+    console.error('Modal de categorías no encontrado');
+  }
+}
+
+// Cerrar modal de categorías
+function closeCategoriesModal() {
+  document.getElementById('categoriesModal').classList.add('hidden');
+}
+
+// Cargar estadísticas de categorías
+async function loadCategoryStats() {
+  try {
+    const response = await fetch(`${API_URL}/categories/stats`, {
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Error cargando estadísticas');
+    
+    const stats = await response.json();
+    renderCategoriesList(stats);
+    
+  } catch (error) {
+    console.error('Error cargando estadísticas:', error);
+  }
+}
+
+// Renderizar lista de categorías
+function renderCategoriesList(categoriesWithStats) {
+  const tbody = document.getElementById('categoriesList');
+  tbody.innerHTML = '';
+  
+  categoriesWithStats.forEach((category, index) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="px-4 py-3">
+        <button class="text-gray-400 hover:text-gray-600 cursor-move">
+          <i class="fas fa-grip-vertical"></i>
+        </button>
+      </td>
+      <td class="px-4 py-3 font-medium">${category.name}</td>
+      <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded" style="background-color: ${category.color}"></div>
+          <span class="text-sm text-gray-600">${category.color}</span>
+        </div>
+      </td>
+      <td class="px-4 py-3">
+        ${category.icon ? `<i class="fas ${category.icon}"></i>` : '-'}
+      </td>
+      <td class="px-4 py-3">
+        <span class="bg-gray-100 px-2 py-1 rounded text-sm">${category.template_count}</span>
+      </td>
+      <td class="px-4 py-3 text-right">
+        <button onclick="editCategory('${category.id}')" class="text-blue-600 hover:text-blue-800 mr-2">
+          <i class="fas fa-edit"></i>
+        </button>
+        <button onclick="deleteCategory('${category.id}')" class="text-red-600 hover:text-red-800">
+          <i class="fas fa-trash"></i>
+        </button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// Añadir categoría
+async function addCategory(e) {
+  e.preventDefault();
+  
+  const name = document.getElementById('categoryName').value;
+  const color = document.getElementById('categoryColor').value;
+  const icon = document.getElementById('categoryIcon').value;
+  
+  try {
+    const response = await fetch(`${API_URL}/categories`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({ name, color, icon })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Error creando categoría');
+    }
+    
+    showToast('Categoría creada exitosamente');
+    document.getElementById('addCategoryForm').reset();
+    loadCategories();
+    loadCategoryStats();
+    
+  } catch (error) {
+    console.error('Error:', error);
+    showToast(error.message, 'error');
+  }
+}
+
+// Eliminar categoría
+async function deleteCategory(id) {
+  if (!confirm('¿Estás seguro de eliminar esta categoría? Las plantillas no se eliminarán.')) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`${API_URL}/categories/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Error eliminando categoría');
+    
+    showToast('Categoría eliminada exitosamente');
+    loadCategories();
+    loadCategoryStats();
+    
+  } catch (error) {
+    console.error('Error:', error);
+    showToast('Error eliminando categoría', 'error');
+  }
+}
+
+// Setup de listeners para categorías
+document.addEventListener('DOMContentLoaded', () => {
+  // Filtro "Todas"
+  const allChip = document.querySelector('[data-category="all"]');
+  if (allChip) {
+    allChip.addEventListener('click', () => filterByCategory('all'));
+  }
+  
+  // Modal de categorías
+  const closeBtn = document.getElementById('closeCategoriesModal');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeCategoriesModal);
+  }
+  
+  // Formulario de añadir categoría
+  const addForm = document.getElementById('addCategoryForm');
+  if (addForm) {
+    addForm.addEventListener('submit', addCategory);
+  }
+});
+
+// =================================
+// ASIGNACIÓN RÁPIDA Y BULK ACTIONS
+// =================================
+
+let selectedTemplates = new Set();
+let currentTemplateForCategory = null;
+
+// Mostrar menú de categorías rápido
+function showQuickCategoryMenu(event, templateId) {
+  event.stopPropagation();
+  currentTemplateForCategory = templateId;
+  
+  const menu = document.getElementById('quickCategoryMenu');
+  const optionsContainer = document.getElementById('quickCategoryOptions');
+  
+  // Limpiar opciones anteriores
+  optionsContainer.innerHTML = '';
+  
+  // Añadir opción "Sin categoría"
+  const noCategoryOption = document.createElement('button');
+  noCategoryOption.className = 'w-full px-4 py-2 text-left hover:bg-gray-100 text-sm';
+  noCategoryOption.innerHTML = '<i class="fas fa-times-circle mr-2 text-gray-400"></i>Sin categoría';
+  noCategoryOption.onclick = () => assignQuickCategory(null);
+  optionsContainer.appendChild(noCategoryOption);
+  
+  // Añadir categorías
+  categories.forEach(category => {
+    const option = document.createElement('button');
+    option.className = 'w-full px-4 py-2 text-left hover:bg-gray-100 text-sm flex items-center gap-2';
+    option.innerHTML = `
+      <div class="w-4 h-4 rounded" style="background-color: ${category.color}"></div>
+      ${category.icon ? `<i class="fas ${category.icon}"></i>` : ''}
+      ${category.name}
+    `;
+    option.onclick = () => assignQuickCategory(category.id);
+    optionsContainer.appendChild(option);
+  });
+  
+  // Posicionar el menú
+  const rect = event.target.getBoundingClientRect();
+  menu.style.top = rect.bottom + 'px';
+  menu.style.left = rect.left + 'px';
+  menu.classList.remove('hidden');
+  
+  // Cerrar al hacer click fuera
+  setTimeout(() => {
+    document.addEventListener('click', hideQuickCategoryMenu);
+  }, 100);
+}
+
+// Ocultar menú de categorías
+function hideQuickCategoryMenu() {
+  document.getElementById('quickCategoryMenu').classList.add('hidden');
+  document.removeEventListener('click', hideQuickCategoryMenu);
+}
+
+// Asignar categoría rápidamente
+async function assignQuickCategory(categoryId) {
+  if (!currentTemplateForCategory) return;
+  
+  try {
+    const response = await fetch(`${API_URL}/templates/assign-category`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({
+        templateIds: [currentTemplateForCategory],
+        categoryId: categoryId
+      })
+    });
+    
+    if (!response.ok) throw new Error('Error asignando categoría');
+    
+    showToast('Categoría actualizada');
+    hideQuickCategoryMenu();
+    loadTemplates();
+    
+  } catch (error) {
+    console.error('Error:', error);
+    showToast('Error asignando categoría', 'error');
+  }
+}
+
+// Activar modo de selección múltiple
+function enableBulkSelection() {
+  const templates = document.querySelectorAll('.template-card');
+  templates.forEach(card => {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'template-checkbox absolute top-4 left-4 w-5 h-5 z-10';
+    checkbox.dataset.templateId = card.dataset.id;
+    checkbox.onchange = () => updateBulkSelection();
+    card.appendChild(checkbox);
+  });
+  
+  document.getElementById('bulkActionsBar').classList.remove('hidden');
+  updateBulkSelection();
+}
+
+// Actualizar selección bulk
+function updateBulkSelection() {
+  selectedTemplates.clear();
+  const checkboxes = document.querySelectorAll('.template-checkbox:checked');
+  checkboxes.forEach(cb => selectedTemplates.add(cb.dataset.templateId));
+  
+  document.getElementById('selectedCount').textContent = 
+    `${selectedTemplates.size} plantilla${selectedTemplates.size !== 1 ? 's' : ''} seleccionada${selectedTemplates.size !== 1 ? 's' : ''}`;
+}
+
+// Cancelar selección bulk
+function cancelBulkSelection() {
+  selectedTemplates.clear();
+  document.querySelectorAll('.template-checkbox').forEach(cb => cb.remove());
+  document.getElementById('bulkActionsBar').classList.add('hidden');
+}
+
+// Asignar categoría en bulk
+async function assignCategoryBulk() {
+  if (selectedTemplates.size === 0) {
+    showToast('Selecciona al menos una plantilla', 'error');
+    return;
+  }
+  
+  // Mostrar diálogo de selección de categoría
+  const categoryId = prompt('Ingresa el ID de la categoría (deja vacío para "Sin categoría"):');
+  
+  try {
+    const response = await fetch(`${API_URL}/templates/assign-category`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({
+        templateIds: Array.from(selectedTemplates),
+        categoryId: categoryId || null
+      })
+    });
+    
+    if (!response.ok) throw new Error('Error asignando categorías');
+    
+    const result = await response.json();
+    showToast(`${result.affected} plantillas actualizadas`);
+    cancelBulkSelection();
+    loadTemplates();
+    
+  } catch (error) {
+    console.error('Error:', error);
+    showToast('Error asignando categorías', 'error');
+  }
+}
+
+// Eliminar en bulk
+async function deleteBulk() {
+  if (selectedTemplates.size === 0) {
+    showToast('Selecciona al menos una plantilla', 'error');
+    return;
+  }
+  
+  if (!confirm(`¿Estás seguro de eliminar ${selectedTemplates.size} plantilla(s)?`)) {
+    return;
+  }
+  
+  let deleted = 0;
+  for (const templateId of selectedTemplates) {
+    try {
+      const response = await fetch(`${API_URL}/templates/${templateId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+      
+      if (response.ok) deleted++;
+    } catch (error) {
+      console.error('Error eliminando plantilla:', error);
+    }
+  }
+  
+  showToast(`${deleted} plantillas eliminadas`);
+  cancelBulkSelection();
+  loadTemplates();
+}
+
+// Añadir botón de selección múltiple
+document.addEventListener('DOMContentLoaded', () => {
+  // Añadir botón de selección múltiple al header
+  const header = document.querySelector('header .flex.items-center.gap-3');
+  if (header) {
+    const bulkBtn = document.createElement('button');
+    bulkBtn.id = 'bulkSelectBtn';
+    bulkBtn.className = 'px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors';
+    bulkBtn.innerHTML = '<i class="fas fa-check-square mr-2"></i>Selección';
+    bulkBtn.onclick = enableBulkSelection;
+    header.insertBefore(bulkBtn, header.children[1]);
+  }
+  
+  // Listener para "Seleccionar todo"
+  const selectAll = document.getElementById('selectAllTemplates');
+  if (selectAll) {
+    selectAll.onchange = () => {
+      const checkboxes = document.querySelectorAll('.template-checkbox');
+      checkboxes.forEach(cb => cb.checked = selectAll.checked);
+      updateBulkSelection();
+    };
+  }
+});
+
+// Exportar funciones para uso global
+window.openCategoriesModal = openCategoriesModal;
+window.closeCategoriesModal = closeCategoriesModal;
+window.deleteCategory = deleteCategory;
+window.editCategory = function(id) {
+  // Por simplicidad, para editar se elimina y se crea de nuevo
+  alert('Para editar, elimina la categoría y créala de nuevo con los valores actualizados');
+};
+window.showQuickCategoryMenu = showQuickCategoryMenu;
+window.assignCategoryBulk = assignCategoryBulk;
+window.deleteBulk = deleteBulk;
+window.cancelBulkSelection = cancelBulkSelection;

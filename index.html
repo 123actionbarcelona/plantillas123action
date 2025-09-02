@@ -38,6 +38,48 @@
             backdrop-filter: blur(10px);
             background: rgba(255, 255, 255, 0.95);
         }
+        .category-chip {
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+        .category-chip:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .category-chip.active {
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .template-card {
+            position: relative;
+            transition: all 0.3s;
+        }
+        .template-card:hover {
+            transform: translateY(-4px);
+        }
+        .category-border {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+        }
+        .category-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .sortable-ghost {
+            opacity: 0.4;
+        }
+        .sortable-drag {
+            opacity: 1 !important;
+        }
     </style>
 </head>
 <body class="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
@@ -145,6 +187,26 @@
 
     <!-- Main Content -->
     <main class="container mx-auto px-4 py-8">
+        <!-- Category Filter Chips -->
+        <div class="mb-6 bg-white rounded-lg shadow p-4">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-lg font-semibold text-gray-700 flex items-center gap-2">
+                    <i class="fas fa-filter"></i>
+                    Filtrar por Categoría
+                </h3>
+                <button id="manageCategoriesBtn" onclick="openCategoriesModal()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm flex items-center gap-2">
+                    <i class="fas fa-cog"></i>
+                    Gestionar Categorías
+                </button>
+            </div>
+            <div id="categoryFilters" class="flex flex-wrap gap-2">
+                <!-- Los filtros de categoría se renderizarán aquí dinámicamente -->
+                <button data-category="all" class="category-chip px-4 py-2 rounded-full bg-gray-600 text-white transition-all">
+                    <i class="fas fa-th mr-2"></i>Todas
+                </button>
+            </div>
+        </div>
+
         <!-- Stats -->
         <div class="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             <div class="bg-white rounded-lg shadow p-6">
@@ -221,6 +283,16 @@
                         placeholder="Ej: Email de bienvenida con información básica">
                 </div>
                 <div class="mb-5">
+                    <label for="templateCategory" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-tag mr-2"></i>Categoría
+                    </label>
+                    <select id="templateCategory" 
+                        class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500">
+                        <option value="">Sin categoría</option>
+                        <!-- Las categorías se cargarán dinámicamente -->
+                    </select>
+                </div>
+                <div class="mb-5">
                     <label for="templateHTML" class="block text-gray-700 font-semibold mb-2">
                         <i class="fas fa-code mr-2"></i>Código HTML
                     </label>
@@ -268,6 +340,16 @@
                     </label>
                     <input type="text" id="editTemplateDescription" required 
                         class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-green-500">
+                </div>
+                <div class="mb-5">
+                    <label for="editTemplateCategory" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-tag mr-2"></i>Categoría
+                    </label>
+                    <select id="editTemplateCategory" 
+                        class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-green-500">
+                        <option value="">Sin categoría</option>
+                        <!-- Las categorías se cargarán dinámicamente -->
+                    </select>
                 </div>
                 <div class="mb-5">
                     <label for="editTemplateHTML" class="block text-gray-700 font-semibold mb-2">
@@ -415,6 +497,98 @@
         </div>
     </div>
 
+    <!-- Categories Management Modal -->
+    <div id="categoriesModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0 bg-black bg-opacity-50"></div>
+        <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden slide-in">
+            <div class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6">
+                <h2 class="text-2xl font-bold flex items-center gap-3">
+                    <i class="fas fa-tags"></i>
+                    Gestión de Categorías
+                </h2>
+            </div>
+            <div class="p-6">
+                <!-- Add Category Form -->
+                <div class="mb-6 bg-gray-50 rounded-lg p-4">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Nueva Categoría</h3>
+                    <form id="addCategoryForm" class="flex flex-wrap gap-3">
+                        <input type="text" id="categoryName" required 
+                            class="flex-1 min-w-[200px] px-4 py-2 border rounded-lg focus:outline-none focus:border-indigo-500"
+                            placeholder="Nombre de la categoría">
+                        <div class="flex items-center gap-2">
+                            <label for="categoryColor" class="text-gray-700">Color:</label>
+                            <input type="color" id="categoryColor" value="#6366f1" 
+                                class="w-16 h-10 border rounded cursor-pointer">
+                        </div>
+                        <input type="text" id="categoryIcon" 
+                            class="w-40 px-4 py-2 border rounded-lg focus:outline-none focus:border-indigo-500"
+                            placeholder="fa-icon (opcional)">
+                        <button type="submit" 
+                            class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+                            <i class="fas fa-plus mr-2"></i>Añadir
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Categories List -->
+                <div class="overflow-y-auto max-h-[400px]">
+                    <table class="w-full">
+                        <thead class="bg-gray-100 sticky top-0">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-gray-700">Orden</th>
+                                <th class="px-4 py-3 text-left text-gray-700">Nombre</th>
+                                <th class="px-4 py-3 text-left text-gray-700">Color</th>
+                                <th class="px-4 py-3 text-left text-gray-700">Icono</th>
+                                <th class="px-4 py-3 text-left text-gray-700">Plantillas</th>
+                                <th class="px-4 py-3 text-right text-gray-700">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="categoriesList" class="divide-y divide-gray-200">
+                            <!-- Las categorías se renderizarán aquí dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="bg-gray-50 px-6 py-4 flex justify-end">
+                <button id="closeCategoriesModal" 
+                    class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                    Cerrar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Category Menu -->
+    <div id="quickCategoryMenu" class="hidden fixed bg-white rounded-lg shadow-xl border z-50">
+        <div class="py-2">
+            <h4 class="px-4 py-2 text-sm font-semibold text-gray-700 border-b">Cambiar Categoría</h4>
+            <div id="quickCategoryOptions" class="max-h-64 overflow-y-auto">
+                <!-- Las opciones se renderizarán dinámicamente -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Actions Bar -->
+    <div id="bulkActionsBar" class="hidden fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg z-40">
+        <div class="container mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <input type="checkbox" id="selectAllTemplates" class="w-5 h-5">
+                <span id="selectedCount" class="text-gray-700 font-medium">0 plantillas seleccionadas</span>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="assignCategoryBulk()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                    <i class="fas fa-tags mr-2"></i>Asignar Categoría
+                </button>
+                <button onclick="deleteBulk()" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                    <i class="fas fa-trash mr-2"></i>Eliminar
+                </button>
+                <button onclick="cancelBulkSelection()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification -->
     <div id="toast" class="hidden fixed bottom-8 right-8 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg toast z-50 flex items-center gap-3">
         <i class="fas fa-check-circle"></i>
@@ -423,6 +597,6 @@
 
     </div> <!-- Fin mainApp -->
 
-    <script src="app.js"></script>
+    <script src="app.js?v=4"></script>
 </body>
 </html>

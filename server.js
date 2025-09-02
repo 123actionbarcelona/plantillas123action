@@ -429,7 +429,27 @@ app.delete('/api/users/:id', authenticateToken, (req, res) => {
 
 // Obtener todas las plantillas
 app.get('/api/templates', authenticateToken, (req, res) => {
-  db.all("SELECT * FROM templates ORDER BY updated_at DESC", (err, rows) => {
+  const { category } = req.query;
+  
+  let query = `
+    SELECT 
+      t.*,
+      c.name as category_name,
+      c.color as category_color,
+      c.icon as category_icon
+    FROM templates t
+    LEFT JOIN categories c ON t.category_id = c.id
+  `;
+  
+  const params = [];
+  if (category) {
+    query += " WHERE t.category_id = ?";
+    params.push(category);
+  }
+  
+  query += " ORDER BY t.updated_at DESC";
+  
+  db.all(query, params, (err, rows) => {
     if (err) {
       res.status(500).json({ error: err.message });
       return;
@@ -456,19 +476,28 @@ app.get('/api/templates/:id', authenticateToken, (req, res) => {
 
 // Crear nueva plantilla
 app.post('/api/templates', authenticateToken, (req, res) => {
-  const { title, description, html } = req.body;
+  const { title, description, html, category_id } = req.body;
   const id = uuidv4();
   
   db.run(
-    "INSERT INTO templates (id, title, description, html) VALUES (?, ?, ?, ?)",
-    [id, title, description, html],
+    "INSERT INTO templates (id, title, description, html, category_id) VALUES (?, ?, ?, ?, ?)",
+    [id, title, description, html, category_id || null],
     function(err) {
       if (err) {
         res.status(500).json({ error: err.message });
         return;
       }
       
-      db.get("SELECT * FROM templates WHERE id = ?", [id], (err, row) => {
+      db.get(`
+        SELECT 
+          t.*,
+          c.name as category_name,
+          c.color as category_color,
+          c.icon as category_icon
+        FROM templates t
+        LEFT JOIN categories c ON t.category_id = c.id
+        WHERE t.id = ?
+      `, [id], (err, row) => {
         if (err) {
           res.status(500).json({ error: err.message });
           return;
@@ -482,11 +511,11 @@ app.post('/api/templates', authenticateToken, (req, res) => {
 // Actualizar plantilla
 app.put('/api/templates/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
-  const { title, description, html } = req.body;
+  const { title, description, html, category_id } = req.body;
   
   db.run(
-    "UPDATE templates SET title = ?, description = ?, html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    [title, description, html, id],
+    "UPDATE templates SET title = ?, description = ?, html = ?, category_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [title, description, html, category_id, id],
     function(err) {
       if (err) {
         res.status(500).json({ error: err.message });
@@ -498,7 +527,16 @@ app.put('/api/templates/:id', authenticateToken, (req, res) => {
         return;
       }
       
-      db.get("SELECT * FROM templates WHERE id = ?", [id], (err, row) => {
+      db.get(`
+        SELECT 
+          t.*,
+          c.name as category_name,
+          c.color as category_color,
+          c.icon as category_icon
+        FROM templates t
+        LEFT JOIN categories c ON t.category_id = c.id
+        WHERE t.id = ?
+      `, [id], (err, row) => {
         if (err) {
           res.status(500).json({ error: err.message });
           return;
@@ -548,6 +586,208 @@ app.get('/api/stats', authenticateToken, (req, res) => {
       });
     }
   );
+});
+
+// ==========================================
+// SISTEMA DE CATEGORÍAS
+// ==========================================
+
+// Obtener todas las categorías
+app.get('/api/categories', authenticateToken, (req, res) => {
+  db.all("SELECT * FROM categories ORDER BY order_index ASC", (err, rows) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    res.json(rows);
+  });
+});
+
+// Obtener estadísticas de categorías (DEBE IR ANTES que :id)
+app.get('/api/categories/stats', authenticateToken, (req, res) => {
+  db.all(
+    `SELECT 
+      c.id,
+      c.name,
+      c.color,
+      c.icon,
+      COUNT(t.id) as template_count
+    FROM categories c
+    LEFT JOIN templates t ON c.id = t.category_id
+    GROUP BY c.id
+    ORDER BY c.order_index ASC`,
+    (err, rows) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      res.json(rows);
+    }
+  );
+});
+
+// Obtener una categoría por ID
+app.get('/api/categories/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  db.get("SELECT * FROM categories WHERE id = ?", [id], (err, row) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    if (!row) {
+      res.status(404).json({ error: 'Categoría no encontrada' });
+      return;
+    }
+    res.json(row);
+  });
+});
+
+// Crear nueva categoría
+app.post('/api/categories', authenticateToken, (req, res) => {
+  const { name, color, icon } = req.body;
+  const id = 'cat-' + uuidv4();
+  
+  // Obtener el máximo order_index actual
+  db.get("SELECT MAX(order_index) as maxOrder FROM categories", (err, row) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    const nextOrder = (row?.maxOrder || 0) + 1;
+    
+    db.run(
+      "INSERT INTO categories (id, name, color, icon, order_index) VALUES (?, ?, ?, ?, ?)",
+      [id, name, color || '#6366f1', icon || null, nextOrder],
+      function(err) {
+        if (err) {
+          if (err.message.includes('UNIQUE')) {
+            res.status(400).json({ error: 'Ya existe una categoría con ese nombre' });
+          } else {
+            res.status(500).json({ error: err.message });
+          }
+          return;
+        }
+        
+        db.get("SELECT * FROM categories WHERE id = ?", [id], (err, row) => {
+          if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+          }
+          res.status(201).json(row);
+        });
+      }
+    );
+  });
+});
+
+// Actualizar categoría
+app.put('/api/categories/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  const { name, color, icon } = req.body;
+  
+  db.run(
+    "UPDATE categories SET name = ?, color = ?, icon = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [name, color, icon, id],
+    function(err) {
+      if (err) {
+        if (err.message.includes('UNIQUE')) {
+          res.status(400).json({ error: 'Ya existe una categoría con ese nombre' });
+        } else {
+          res.status(500).json({ error: err.message });
+        }
+        return;
+      }
+      
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Categoría no encontrada' });
+        return;
+      }
+      
+      db.get("SELECT * FROM categories WHERE id = ?", [id], (err, row) => {
+        if (err) {
+          res.status(500).json({ error: err.message });
+          return;
+        }
+        res.json(row);
+      });
+    }
+  );
+});
+
+// Actualizar orden de categorías
+app.put('/api/categories/reorder', authenticateToken, (req, res) => {
+  const { orders } = req.body; // Array de {id, order_index}
+  
+  if (!Array.isArray(orders)) {
+    return res.status(400).json({ error: 'Se requiere un array de órdenes' });
+  }
+  
+  const stmt = db.prepare("UPDATE categories SET order_index = ? WHERE id = ?");
+  
+  orders.forEach(({ id, order_index }) => {
+    stmt.run(order_index, id);
+  });
+  
+  stmt.finalize((err) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    res.json({ message: 'Orden actualizado exitosamente' });
+  });
+});
+
+// Eliminar categoría
+app.delete('/api/categories/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  
+  // Primero actualizar las plantillas que usan esta categoría
+  db.run("UPDATE templates SET category_id = NULL WHERE category_id = ?", [id], (err) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    db.run("DELETE FROM categories WHERE id = ?", [id], function(err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Categoría no encontrada' });
+        return;
+      }
+      
+      res.json({ message: 'Categoría eliminada exitosamente' });
+    });
+  });
+});
+
+// Asignar categoría a plantillas (bulk)
+app.post('/api/templates/assign-category', authenticateToken, (req, res) => {
+  const { templateIds, categoryId } = req.body;
+  
+  if (!Array.isArray(templateIds) || templateIds.length === 0) {
+    return res.status(400).json({ error: 'Se requiere un array de IDs de plantillas' });
+  }
+  
+  const placeholders = templateIds.map(() => '?').join(',');
+  const query = `UPDATE templates SET category_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`;
+  const params = [categoryId, ...templateIds];
+  
+  db.run(query, params, function(err) {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    res.json({ 
+      message: 'Categorías asignadas exitosamente',
+      affected: this.changes 
+    });
+  });
 });
 
 // ==========================================
