@@ -558,6 +558,66 @@
         </div>
     </div>
 
+    <!-- Edit Category Modal -->
+    <div id="editCategoryModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0 bg-black bg-opacity-50"></div>
+        <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-md slide-in">
+            <div class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6">
+                <h2 class="text-2xl font-bold flex items-center gap-3">
+                    <i class="fas fa-edit"></i>
+                    Editar Categoría
+                </h2>
+            </div>
+            <form id="editCategoryForm" class="p-6">
+                <input type="hidden" id="editCategoryId">
+                <div class="mb-5">
+                    <label for="editCategoryName" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-tag mr-2"></i>Nombre
+                    </label>
+                    <input type="text" id="editCategoryName" required 
+                        class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-indigo-500">
+                </div>
+                <div class="mb-5">
+                    <label for="editCategoryColor" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-palette mr-2"></i>Color
+                    </label>
+                    <div class="flex items-center gap-3">
+                        <input type="color" id="editCategoryColor" 
+                            class="w-20 h-10 border rounded cursor-pointer">
+                        <input type="text" id="editCategoryColorText" 
+                            class="flex-1 px-4 py-2 border rounded-lg" 
+                            pattern="^#[0-9A-Fa-f]{6}$"
+                            placeholder="#6366f1">
+                    </div>
+                </div>
+                <div class="mb-5">
+                    <label for="editCategoryIcon" class="block text-gray-700 font-semibold mb-2">
+                        <i class="fas fa-icons mr-2"></i>Icono (opcional)
+                    </label>
+                    <div class="flex items-center gap-3">
+                        <input type="text" id="editCategoryIcon" 
+                            class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:border-indigo-500"
+                            placeholder="fa-icon">
+                        <div id="editCategoryIconPreview" class="w-10 h-10 border rounded flex items-center justify-center">
+                            <i class="fas fa-question text-gray-400"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" onclick="closeEditCategoryModal()" 
+                        class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                        Cancelar
+                    </button>
+                    <button type="submit" 
+                        class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+                        <i class="fas fa-save mr-2"></i>
+                        Guardar Cambios
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Quick Category Menu -->
     <div id="quickCategoryMenu" class="hidden fixed bg-white rounded-lg shadow-xl border z-50">
         <div class="py-2">
@@ -597,6 +657,6 @@
 
     </div> <!-- Fin mainApp -->
 
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
 </body>
 </html>

@@ -1763,10 +1763,112 @@ document.addEventListener('DOMContentLoaded', () => {
 window.openCategoriesModal = openCategoriesModal;
 window.closeCategoriesModal = closeCategoriesModal;
 window.deleteCategory = deleteCategory;
-window.editCategory = function(id) {
-  // Por simplicidad, para editar se elimina y se crea de nuevo
-  alert('Para editar, elimina la categoría y créala de nuevo con los valores actualizados');
-};
+// Editar categoría
+async function editCategory(categoryId) {
+  // Buscar la categoría actual
+  const category = categories.find(c => c.id === categoryId);
+  if (!category) return;
+  
+  // Llenar el formulario con los datos actuales
+  document.getElementById('editCategoryId').value = category.id;
+  document.getElementById('editCategoryName').value = category.name;
+  document.getElementById('editCategoryColor').value = category.color;
+  document.getElementById('editCategoryColorText').value = category.color;
+  document.getElementById('editCategoryIcon').value = category.icon || '';
+  
+  // Actualizar preview del icono
+  updateIconPreview(category.icon);
+  
+  // Mostrar el modal
+  document.getElementById('editCategoryModal').classList.remove('hidden');
+}
+
+// Cerrar modal de edición
+function closeEditCategoryModal() {
+  document.getElementById('editCategoryModal').classList.add('hidden');
+}
+
+// Actualizar preview del icono
+function updateIconPreview(icon) {
+  const preview = document.getElementById('editCategoryIconPreview');
+  if (icon) {
+    preview.innerHTML = `<i class="fas ${icon}"></i>`;
+  } else {
+    preview.innerHTML = '<i class="fas fa-question text-gray-400"></i>';
+  }
+}
+
+// Guardar cambios de categoría
+async function saveCategoryChanges(e) {
+  e.preventDefault();
+  
+  const id = document.getElementById('editCategoryId').value;
+  const name = document.getElementById('editCategoryName').value;
+  const color = document.getElementById('editCategoryColor').value;
+  const icon = document.getElementById('editCategoryIcon').value;
+  
+  try {
+    const response = await fetch(`${API_URL}/categories/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({ name, color, icon })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Error actualizando categoría');
+    }
+    
+    showToast('Categoría actualizada exitosamente');
+    closeEditCategoryModal();
+    loadCategories();
+    loadCategoryStats();
+    loadTemplates(); // Recargar plantillas para actualizar los badges
+    
+  } catch (error) {
+    console.error('Error:', error);
+    showToast(error.message, 'error');
+  }
+}
+
+// Event listeners para el modal de edición
+document.addEventListener('DOMContentLoaded', () => {
+  // Formulario de editar categoría
+  const editForm = document.getElementById('editCategoryForm');
+  if (editForm) {
+    editForm.addEventListener('submit', saveCategoryChanges);
+  }
+  
+  // Sincronizar color picker con texto
+  const colorPicker = document.getElementById('editCategoryColor');
+  const colorText = document.getElementById('editCategoryColorText');
+  
+  if (colorPicker && colorText) {
+    colorPicker.addEventListener('change', (e) => {
+      colorText.value = e.target.value;
+    });
+    
+    colorText.addEventListener('input', (e) => {
+      if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) {
+        colorPicker.value = e.target.value;
+      }
+    });
+  }
+  
+  // Preview del icono
+  const iconInput = document.getElementById('editCategoryIcon');
+  if (iconInput) {
+    iconInput.addEventListener('input', (e) => {
+      updateIconPreview(e.target.value);
+    });
+  }
+});
+
+window.editCategory = editCategory;
+window.closeEditCategoryModal = closeEditCategoryModal;
 window.showQuickCategoryMenu = showQuickCategoryMenu;
 window.assignCategoryBulk = assignCategoryBulk;
 window.deleteBulk = deleteBulk;
