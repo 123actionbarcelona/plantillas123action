@@ -844,9 +844,26 @@ app.post('/api/templates/assign-category', authenticateToken, (req, res) => {
 // SISTEMA DE TAGS/ETIQUETAS
 // ==========================================
 
-// Obtener todos los tags
+// Obtener todos los tags (opcionalmente filtrados por categoría)
 app.get('/api/tags', authenticateToken, (req, res) => {
-  db.all("SELECT * FROM tags ORDER BY order_index ASC", (err, rows) => {
+  const { category_id } = req.query;
+  
+  let query = `
+    SELECT t.*, c.name as category_name, c.color as category_color 
+    FROM tags t
+    LEFT JOIN categories c ON t.category_id = c.id
+  `;
+  
+  const params = [];
+  
+  if (category_id && category_id !== 'all') {
+    query += " WHERE t.category_id = ?";
+    params.push(category_id);
+  }
+  
+  query += " ORDER BY t.order_index, t.name";
+  
+  db.all(query, params, (err, rows) => {
     if (err) {
       res.status(500).json({ error: err.message });
       return;
@@ -873,20 +890,39 @@ app.get('/api/tags/:id', authenticateToken, (req, res) => {
 
 // Crear nuevo tag
 app.post('/api/tags', authenticateToken, (req, res) => {
-  const { name, color, icon } = req.body;
+  const { name, color, icon, category_id } = req.body;
   const id = 'tag-' + uuidv4();
   
-  db.get("SELECT MAX(order_index) as maxOrder FROM tags", (err, row) => {
+  // Validar que category_id sea proporcionado
+  if (!category_id) {
+    res.status(400).json({ error: 'Se requiere una categoría para el tag' });
+    return;
+  }
+  
+  // Verificar que la categoría existe
+  db.get("SELECT id FROM categories WHERE id = ?", [category_id], (err, category) => {
     if (err) {
       res.status(500).json({ error: err.message });
       return;
     }
     
-    const nextOrder = (row?.maxOrder || 0) + 1;
+    if (!category) {
+      res.status(404).json({ error: 'Categoría no encontrada' });
+      return;
+    }
     
-    db.run(
-      "INSERT INTO tags (id, name, color, icon, order_index) VALUES (?, ?, ?, ?, ?)",
-      [id, name, color || '#9ca3af', icon || null, nextOrder],
+    // Obtener el siguiente order_index para tags de esta categoría
+    db.get("SELECT MAX(order_index) as maxOrder FROM tags WHERE category_id = ?", [category_id], (err, row) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      
+      const nextOrder = (row?.maxOrder || 0) + 1;
+      
+      db.run(
+        "INSERT INTO tags (id, name, color, icon, category_id, order_index) VALUES (?, ?, ?, ?, ?, ?)",
+        [id, name, color || '#9ca3af', icon || null, category_id, nextOrder],
       function(err) {
         if (err) {
           if (err.message.includes('UNIQUE')) {
@@ -906,17 +942,48 @@ app.post('/api/tags', authenticateToken, (req, res) => {
         });
       }
     );
+    });
   });
 });
 
 // Actualizar tag
 app.put('/api/tags/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
-  const { name, color, icon } = req.body;
+  const { name, color, icon, category_id } = req.body;
   
-  db.run(
-    "UPDATE tags SET name = ?, color = ?, icon = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    [name, color, icon, id],
+  // Si se proporciona category_id, verificar que existe
+  if (category_id) {
+    db.get("SELECT id FROM categories WHERE id = ?", [category_id], (err, category) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      
+      if (!category) {
+        res.status(404).json({ error: 'Categoría no encontrada' });
+        return;
+      }
+      
+      updateTag();
+    });
+  } else {
+    updateTag();
+  }
+  
+  function updateTag() {
+    const updateFields = ["name = ?", "color = ?", "icon = ?", "updated_at = CURRENT_TIMESTAMP"];
+    const params = [name, color, icon];
+    
+    if (category_id) {
+      updateFields.push("category_id = ?");
+      params.push(category_id);
+    }
+    
+    params.push(id);
+    
+    db.run(
+      `UPDATE tags SET ${updateFields.join(", ")} WHERE id = ?`,
+      params,
     function(err) {
       if (err) {
         if (err.message.includes('UNIQUE')) {
@@ -941,6 +1008,7 @@ app.put('/api/tags/:id', authenticateToken, (req, res) => {
       });
     }
   );
+  }
 });
 
 // Eliminar tag

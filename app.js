@@ -1391,6 +1391,13 @@ function renderCategoryFilters() {
 // Filtrar por categoría
 function filterByCategory(categoryId) {
   selectedCategory = categoryId;
+  
+  // Resetear tags seleccionados cuando cambiamos de categoría
+  selectedTags.clear();
+  
+  // Cargar tags de la categoría seleccionada
+  loadTags(categoryId);
+  
   updateActiveChip();
   filterTemplates();
 }
@@ -1910,9 +1917,14 @@ window.cancelBulkSelection = cancelBulkSelection;
 // =================================
 
 // Cargar tags
-async function loadTags() {
+async function loadTags(categoryId = null) {
   try {
-    const response = await fetch(`${API_URL}/tags`, {
+    let url = `${API_URL}/tags`;
+    if (categoryId && categoryId !== 'all') {
+      url += `?category_id=${categoryId}`;
+    }
+    
+    const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${authToken}`
       }
@@ -1933,18 +1945,51 @@ async function loadTags() {
 // Renderizar filtros de tags
 function renderTagFilters() {
   const container = document.getElementById('tagFilters');
+  const tagSection = document.getElementById('tagFilterSection');
   if (!container) return;
   
-  // Mantener el botón "Todos"
-  const allButton = container.querySelector('[data-tag="all"]');
+  // Limpiar contenedor
   container.innerHTML = '';
-  if (allButton) container.appendChild(allButton);
+  
+  // Si no hay categoría seleccionada o es "all", ocultar la sección de tags
+  if (selectedCategory === 'all') {
+    if (tagSection) {
+      tagSection.style.display = 'none';
+    }
+    return;
+  }
+  
+  // Mostrar la sección de tags
+  if (tagSection) {
+    tagSection.style.display = 'block';
+  }
+  
+  // Si no hay tags para esta categoría, mostrar mensaje
+  if (tags.length === 0) {
+    container.innerHTML = `
+      <div class="text-gray-500 text-sm italic">
+        No hay tags para esta categoría. 
+        <button onclick="openTagsModal()" class="text-indigo-600 hover:text-indigo-700 underline">
+          Crear tags
+        </button>
+      </div>
+    `;
+    return;
+  }
   
   tags.forEach(tag => {
     const chip = document.createElement('button');
     chip.dataset.tagId = tag.id;
     chip.className = 'tag-chip px-3 py-1.5 rounded-full text-white transition-all';
-    chip.style.backgroundColor = tag.color;
+    
+    // Aplicar estilo según si está seleccionado
+    if (selectedTags.has(tag.id)) {
+      chip.style.backgroundColor = tag.color;
+      chip.style.boxShadow = `0 0 0 3px ${tag.color}40`;
+    } else {
+      chip.style.backgroundColor = `${tag.color}CC`;
+    }
+    
     chip.innerHTML = `
       ${tag.icon ? `<i class="fas ${tag.icon} mr-1"></i>` : ''}
       ${tag.name}
@@ -2056,6 +2101,7 @@ function setSelectedTags(containerId, tagIds) {
 function openTagsModal() {
   document.getElementById('tagsModal').classList.remove('hidden');
   loadTagsList();
+  loadCategoriesForTagSelect();
 }
 
 // Cerrar modal de tags
@@ -2063,51 +2109,108 @@ function closeTagsModal() {
   document.getElementById('tagsModal').classList.add('hidden');
 }
 
+// Cargar categorías en los selectores del modal de tags
+function loadCategoriesForTagSelect() {
+  const addSelect = document.getElementById('tagCategoryId');
+  const editSelect = document.getElementById('editTagCategoryId');
+  
+  // Limpiar selectores
+  addSelect.innerHTML = '<option value="">Seleccionar categoría</option>';
+  editSelect.innerHTML = '<option value="">Seleccionar categoría</option>';
+  
+  // Agregar categorías
+  categories.forEach(category => {
+    const option1 = new Option(category.name, category.id);
+    const option2 = new Option(category.name, category.id);
+    addSelect.add(option1);
+    editSelect.add(option2);
+  });
+  
+  // Si hay una categoría seleccionada actualmente y no es "all", preseleccionarla
+  if (selectedCategory && selectedCategory !== 'all') {
+    addSelect.value = selectedCategory;
+  }
+}
+
 // Cargar lista de tags con estadísticas
 async function loadTagsList() {
   const tbody = document.getElementById('tagsList');
   tbody.innerHTML = '';
   
-  // Contar uso de cada tag
-  const tagUsage = {};
-  tags.forEach(tag => {
-    tagUsage[tag.id] = templates.filter(t => 
-      t.tags && t.tags.some(tt => tt.id === tag.id)
-    ).length;
-  });
-  
-  tags.forEach(tag => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="px-4 py-3 font-medium">
-        <span class="inline-flex items-center gap-1">
-          ${tag.icon ? `<i class="fas ${tag.icon}"></i>` : ''}
-          ${tag.name}
-        </span>
-      </td>
-      <td class="px-4 py-3">
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 rounded" style="background-color: ${tag.color}"></div>
-          <span class="text-sm text-gray-600">${tag.color}</span>
-        </div>
-      </td>
-      <td class="px-4 py-3">
-        ${tag.icon ? `<i class="fas ${tag.icon}"></i>` : '-'}
-      </td>
-      <td class="px-4 py-3">
-        <span class="bg-gray-100 px-2 py-1 rounded text-sm">${tagUsage[tag.id] || 0}</span>
-      </td>
-      <td class="px-4 py-3 text-right">
-        <button onclick="editTag('${tag.id}')" class="text-purple-600 hover:text-purple-800 mr-2">
-          <i class="fas fa-edit"></i>
-        </button>
-        <button onclick="deleteTag('${tag.id}')" class="text-red-600 hover:text-red-800">
-          <i class="fas fa-trash"></i>
-        </button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
+  // Cargar todos los tags (sin filtrar por categoría)
+  try {
+    const response = await fetch(`${API_URL}/tags`, {
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Error cargando tags');
+    
+    const allTags = await response.json();
+    
+    // Contar uso de cada tag
+    const tagUsage = {};
+    allTags.forEach(tag => {
+      tagUsage[tag.id] = templates.filter(t => 
+        t.tags && t.tags.some(tt => tt.id === tag.id)
+      ).length;
+    });
+    
+    // Agrupar tags por categoría
+    const tagsByCategory = {};
+    allTags.forEach(tag => {
+      const categoryName = tag.category_name || 'Sin categoría';
+      if (!tagsByCategory[categoryName]) {
+        tagsByCategory[categoryName] = [];
+      }
+      tagsByCategory[categoryName].push(tag);
+    });
+    
+    // Renderizar tags agrupados por categoría
+    Object.keys(tagsByCategory).sort().forEach(categoryName => {
+      tagsByCategory[categoryName].forEach(tag => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="px-4 py-3">
+            <span class="px-2 py-1 rounded text-sm" 
+              ${tag.category_color ? `style="background-color: ${tag.category_color}20; color: ${tag.category_color}"` : 'class="bg-gray-100"'}>
+              ${categoryName}
+            </span>
+          </td>
+          <td class="px-4 py-3 font-medium">
+            <span class="inline-flex items-center gap-1">
+              ${tag.icon ? `<i class="fas ${tag.icon}"></i>` : ''}
+              ${tag.name}
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded" style="background-color: ${tag.color}"></div>
+              <span class="text-sm text-gray-600">${tag.color}</span>
+            </div>
+          </td>
+          <td class="px-4 py-3">
+            ${tag.icon ? `<i class="fas ${tag.icon}"></i>` : '-'}
+          </td>
+          <td class="px-4 py-3">
+            <span class="bg-gray-100 px-2 py-1 rounded text-sm">${tagUsage[tag.id] || 0}</span>
+          </td>
+          <td class="px-4 py-3 text-right">
+            <button onclick="editTag('${tag.id}')" class="text-purple-600 hover:text-purple-800 mr-2">
+              <i class="fas fa-edit"></i>
+            </button>
+            <button onclick="deleteTag('${tag.id}')" class="text-red-600 hover:text-red-800">
+              <i class="fas fa-trash"></i>
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    });
+  } catch (error) {
+    console.error('Error cargando lista de tags:', error);
+  }
 }
 
 // Añadir tag
@@ -2117,6 +2220,7 @@ async function addTag(e) {
   const name = document.getElementById('tagName').value;
   const color = document.getElementById('tagColor').value;
   const icon = document.getElementById('tagIcon').value;
+  const category_id = document.getElementById('tagCategoryId').value;
   
   try {
     const response = await fetch(`${API_URL}/tags`, {
@@ -2125,7 +2229,7 @@ async function addTag(e) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${authToken}`
       },
-      body: JSON.stringify({ name, color, icon })
+      body: JSON.stringify({ name, color, icon, category_id })
     });
     
     if (!response.ok) {
@@ -2135,7 +2239,7 @@ async function addTag(e) {
     
     showToast('Tag creado exitosamente');
     document.getElementById('addTagForm').reset();
-    loadTags();
+    loadTags(selectedCategory);
     loadTagsList();
     
   } catch (error) {
@@ -2146,17 +2250,39 @@ async function addTag(e) {
 
 // Editar tag
 async function editTag(tagId) {
-  const tag = tags.find(t => t.id === tagId);
-  if (!tag) return;
-  
-  document.getElementById('editTagId').value = tag.id;
-  document.getElementById('editTagName').value = tag.name;
-  document.getElementById('editTagColor').value = tag.color;
-  document.getElementById('editTagColorText').value = tag.color;
-  document.getElementById('editTagIcon').value = tag.icon || '';
-  
-  updateTagIconPreview(tag.icon);
-  document.getElementById('editTagModal').classList.remove('hidden');
+  // Buscar el tag en todos los tags (no solo los filtrados)
+  try {
+    const response = await fetch(`${API_URL}/tags/${tagId}`, {
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Tag no encontrado');
+    
+    const tag = await response.json();
+    
+    document.getElementById('editTagId').value = tag.id;
+    document.getElementById('editTagName').value = tag.name;
+    document.getElementById('editTagColor').value = tag.color;
+    document.getElementById('editTagColorText').value = tag.color;
+    document.getElementById('editTagIcon').value = tag.icon || '';
+    document.getElementById('editTagCategoryId').value = tag.category_id || '';
+    
+    // Asegurarse de que las categorías están cargadas en el selector
+    if (!document.getElementById('editTagCategoryId').options.length > 1) {
+      loadCategoriesForTagSelect();
+      setTimeout(() => {
+        document.getElementById('editTagCategoryId').value = tag.category_id || '';
+      }, 100);
+    }
+    
+    updateTagIconPreview(tag.icon);
+    document.getElementById('editTagModal').classList.remove('hidden');
+  } catch (error) {
+    console.error('Error cargando tag:', error);
+    showToast('Error al cargar el tag', 'error');
+  }
 }
 
 // Cerrar modal de edición de tag
@@ -2182,6 +2308,7 @@ async function saveTagChanges(e) {
   const name = document.getElementById('editTagName').value;
   const color = document.getElementById('editTagColor').value;
   const icon = document.getElementById('editTagIcon').value;
+  const category_id = document.getElementById('editTagCategoryId').value;
   
   try {
     const response = await fetch(`${API_URL}/tags/${id}`, {
@@ -2190,7 +2317,7 @@ async function saveTagChanges(e) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${authToken}`
       },
-      body: JSON.stringify({ name, color, icon })
+      body: JSON.stringify({ name, color, icon, category_id })
     });
     
     if (!response.ok) {
@@ -2200,7 +2327,7 @@ async function saveTagChanges(e) {
     
     showToast('Tag actualizado exitosamente');
     closeEditTagModal();
-    loadTags();
+    loadTags(selectedCategory);
     loadTagsList();
     loadTemplates();
     
@@ -2227,7 +2354,7 @@ async function deleteTag(id) {
     if (!response.ok) throw new Error('Error eliminando tag');
     
     showToast('Tag eliminado exitosamente');
-    loadTags();
+    loadTags(selectedCategory);
     loadTagsList();
     loadTemplates();
     
